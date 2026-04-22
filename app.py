@@ -266,18 +266,18 @@ def load_and_process_pagamentos(uploaded_file):
 
         # Se for CSV/Excel sem cabeçalho mapeado
         if not isinstance(df_pag.columns[0], str) or 'MATRICULA_PAGAMENTO' not in df_pag.columns:
-            col_indices = [0, 5, 8]
+            col_indices = [0, 4, 8]
             col_names = ['MATRICULA_PAGAMENTO', 'DATA_PAGAMENTO', 'VALOR_PAGO']
-            if df_pag.shape[1] > 12:
-                col_indices.append(12)
+            if df_pag.shape[1] > 18:
+                col_indices.append(18)
                 col_names.append('TIPO_PAGAMENTO')
 
             df_temp = df_pag.iloc[:, col_indices].copy()
             df_temp.columns = col_names
 
-            if df_pag.shape[1] > 4: df_temp['VENCIMENTO'] = df_pag.iloc[:, 4].values
-            if df_pag.shape[1] > 11: df_temp['TIPO_FATURA'] = df_pag.iloc[:, 11].values
-            if df_pag.shape[1] > 9: df_temp['UTILIZACAO'] = df_pag.iloc[:, 9].values
+            if df_pag.shape[1] > 4: df_temp['VENCIMENTO'] = df_pag.iloc[:, 5].values
+            if df_pag.shape[1] > 11: df_temp['TIPO_FATURA'] = df_pag.iloc[:, 15].values
+            if df_pag.shape[1] > 9: df_temp['UTILIZACAO'] = df_pag.iloc[:, 10].values
             df_pag = df_temp
 
         df_pag['MATRICULA_PAGAMENTO'] = df_pag['MATRICULA_PAGAMENTO'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
