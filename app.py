@@ -418,6 +418,28 @@ if is_admin():
             if ok: st.success(f"Pagamentos atualizados! Total: {total} | Novos: {novos}")
 
 # ══════════════════════════════════════════════════════════════
+# CARREGAMENTO DOS DADOS
+# ══════════════════════════════════════════════════════════════
+
+df_envios     = None
+df_clientes   = None
+df_pagamentos = None
+dados_prontos = False
+
+if campanha_selecionada is not None:
+    with st.spinner("Carregando dados da campanha..."):
+        df_envios   = load_campanha_envios(campanha_selecionada['id'])
+        df_clientes = load_campanha_clientes(campanha_selecionada['id'])
+        df_pagamentos = load_pagamentos_github()
+
+    # Verifica se todos os 3 arquivos foram carregados com sucesso
+    dados_prontos = (
+        df_envios is not None and
+        df_clientes is not None and
+        df_pagamentos is not None
+    )
+
+# ══════════════════════════════════════════════════════════════
 # ANÁLISE
 # ══════════════════════════════════════════════════════════════
 
