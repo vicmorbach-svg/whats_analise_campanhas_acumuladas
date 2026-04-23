@@ -685,4 +685,3 @@ elif not executar_analise:
         st.info("👈 Selecione uma campanha na barra lateral para começar.")
     else:
         st.info("👈 Clique em **Executar Análise** na barra lateral para gerar os resultados.")
-            st.dataframe(df_pagamentos_campanha, use_container_width=True)
