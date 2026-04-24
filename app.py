@@ -414,7 +414,7 @@ if campanha_selecionada_nome != "(nenhuma)":
         delete_campanha(campanha_selecionada['id'], campanha_selecionada_nome)
         st.rerun()
 
-janela_dias = st.sidebar.slider("Janela de dias após o envio:", 0, 30, 7)
+janela_dias = st.sidebar.slider("Janela de dias após o envio:", 0, 30, 10)
 executar_analise = st.sidebar.button("▶️ Executar Análise")
 
 if is_admin():
