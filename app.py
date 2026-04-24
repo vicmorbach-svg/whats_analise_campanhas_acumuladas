@@ -7,6 +7,7 @@ import base64
 import requests
 import json
 import uuid
+import gc
 
 # ══════════════════════════════════════════════════════════════
 # SISTEMA DE LOGIN
@@ -468,27 +469,11 @@ if campanha_selecionada is not None:
     )
 
 # ══════════════════════════════════════════════════════════════
-# ANÁLISE
+# ANÁLISE (VERSÃO OTIMIZADA PARA MEMÓRIA)
 # ══════════════════════════════════════════════════════════════
 
 if executar_analise and dados_prontos:
 
-    # --- NOVO: Indicador de carregamento centralizado e visível ---
-    loader_placeholder = st.empty()
-    loader_placeholder.markdown("""
-        <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 60px; background-color: #f8f9fa; border-radius: 15px; border: 2px dashed #dee2e6; margin: 20px 0;">
-            <h2 style="color: #2c3e50; margin-bottom: 10px;">⏳ Processando Análise...</h2>
-            <p style="color: #7f8c8d; font-size: 16px;">Cruzando dados de envios, clientes e pagamentos. Isso pode levar alguns segundos.</p>
-        </div>
-    """, unsafe_allow_html=True)
-
-    df_envios = load_campanha_envios(campanha_selecionada['id'])
-    df_clientes = load_campanha_clientes(campanha_selecionada['id'])
-    df_pagamentos = load_pagamentos_github()
-
-    # Limpa o indicador de carregamento após os dados serem baixados
-    loader_placeholder.empty()
-    
     # ── Cruzamento envios x clientes ──────────────────────────
     total_clientes_notificados = df_envios['TELEFONE_ENVIO'].nunique()
 
@@ -507,16 +492,33 @@ if executar_analise and dados_prontos:
     total_divida_notificados = df_merge['SITUACAO'].sum()
 
     # Garante tipo string nos campos de matrícula para o merge
-    df_merge['MATRICULA_CLIENTE']              = df_merge['MATRICULA_CLIENTE'].astype(str).str.strip()
-    df_pagamentos['MATRICULA_PAGAMENTO']       = df_pagamentos['MATRICULA_PAGAMENTO'].astype(str).str.strip()
+    df_merge['MATRICULA_CLIENTE'] = df_merge['MATRICULA_CLIENTE'].astype(str).str.strip()
+    df_pagamentos['MATRICULA_PAGAMENTO'] = df_pagamentos['MATRICULA_PAGAMENTO'].astype(str).str.strip()
 
+    # ── OTIMIZAÇÃO DE MEMÓRIA: Pré-filtragem ──────────────────
+    # Descobre quais matrículas realmente importam para esta campanha
+    matriculas_alvo = df_merge['MATRICULA_CLIENTE'].unique()
+
+    # Filtra a base gigante de pagamentos ANTES de fazer o merge
+    df_pagamentos_filtrado = df_pagamentos[df_pagamentos['MATRICULA_PAGAMENTO'].isin(matriculas_alvo)].copy()
+
+    # Libera a memória da base gigante original (opcional, mas recomendado)
+    del df_pagamentos
+    gc.collect() # Força a limpeza da RAM
+
+    # ── Cruzamento final (agora muito mais leve) ──────────────
     df_cruzado = pd.merge(
         df_merge,
-        df_pagamentos,
+        df_pagamentos_filtrado,
         left_on='MATRICULA_CLIENTE',
         right_on='MATRICULA_PAGAMENTO',
         how='inner'
     )
+
+    # Limpa variáveis temporárias que não serão mais usadas
+    del df_merge
+    del df_pagamentos_filtrado
+    gc.collect()
 
     if df_cruzado.empty:
         st.error("Nenhum pagamento encontrado após cruzamento com a base de clientes.")
@@ -531,12 +533,17 @@ if executar_analise and dados_prontos:
         (df_cruzado['DIAS_APOS_ENVIO'] <= janela_dias)
     ].copy()
 
+    # Limpa o dataframe cruzado completo
+    del df_cruzado
+    gc.collect()
+
     df_pagamentos_campanha = df_pagamentos_campanha.drop_duplicates(
         subset=['MATRICULA_CLIENTE', 'DATA_PAGAMENTO', 'VALOR_PAGO'],
         keep='first'
     )
 
     df_pagamentos_campanha.rename(columns={'MATRICULA_CLIENTE': 'MATRICULA'}, inplace=True)
+
 
     # ── Métricas ──────────────────────────────────────────────
     clientes_que_pagaram_matriculas = df_pagamentos_campanha['MATRICULA'].nunique()
