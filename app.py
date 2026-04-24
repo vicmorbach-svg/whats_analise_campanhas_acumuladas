@@ -366,12 +366,26 @@ if not st.session_state.get("logged_in"):
     login_screen()
     st.stop()
 
+# Exibe mensagens de sucesso persistentes
+if "msg_sucesso" in st.session_state:
+    st.sidebar.success(st.session_state["msg_sucesso"])
+    del st.session_state["msg_sucesso"]
+
 st.title("📊 Análise de eficiência de campanha de cobrança via Whatsapp")
 
 st.sidebar.markdown(f"👤 **{st.session_state['username']}**")
 if st.sidebar.button("Sair"):
     st.session_state.clear()
     st.rerun()
+
+st.sidebar.markdown("---")
+
+# --- NOVO: Indicador fixo de pagamentos na base ---
+st.sidebar.header("🏦 Resumo da Base")
+df_pag_geral = load_pagamentos_github()
+total_pag_geral = len(df_pag_geral) if df_pag_geral is not None else 0
+st.sidebar.metric("Total de Pagamentos Cadastrados", f"{total_pag_geral:,}".replace(",", "."))
+st.sidebar.markdown("---")
 
 st.sidebar.header("📋 Campanhas")
 df_meta = load_campanhas_meta()
@@ -445,6 +459,22 @@ if campanha_selecionada is not None:
 
 if executar_analise and dados_prontos:
 
+    # --- NOVO: Indicador de carregamento centralizado e visível ---
+    loader_placeholder = st.empty()
+    loader_placeholder.markdown("""
+        <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 60px; background-color: #f8f9fa; border-radius: 15px; border: 2px dashed #dee2e6; margin: 20px 0;">
+            <h2 style="color: #2c3e50; margin-bottom: 10px;">⏳ Processando Análise...</h2>
+            <p style="color: #7f8c8d; font-size: 16px;">Cruzando dados de envios, clientes e pagamentos. Isso pode levar alguns segundos.</p>
+        </div>
+    """, unsafe_allow_html=True)
+
+    df_envios = load_campanha_envios(campanha_selecionada['id'])
+    df_clientes = load_campanha_clientes(campanha_selecionada['id'])
+    df_pagamentos = load_pagamentos_github()
+
+    # Limpa o indicador de carregamento após os dados serem baixados
+    loader_placeholder.empty()
+    
     # ── Cruzamento envios x clientes ──────────────────────────
     total_clientes_notificados = df_envios['TELEFONE_ENVIO'].nunique()
 
