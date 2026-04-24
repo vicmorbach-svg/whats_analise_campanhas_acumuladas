@@ -253,91 +253,78 @@ def load_and_process_clientes(uploaded_file):
 @st.cache_data
 def load_and_process_pagamentos(uploaded_file):
     try:
-        # 1. Leitura do arquivo
-        if uploaded_file.name.endswith('.parquet'):
-            df_pag = pd.read_parquet(uploaded_file, engine='pyarrow')
-        elif uploaded_file.name.endswith('.csv'):
-            df_pag = None
-            for encoding in ['latin1', 'utf-8', 'cp1252']:
-                try:
-                    # Lê o CSV considerando que a primeira linha é o cabeçalho
-                    df_pag = pd.read_csv(uploaded_file, sep=';', decimal=',', encoding=encoding)
-                    uploaded_file.seek(0)
-                    break
-                except Exception:
-                    uploaded_file.seek(0)
-                    continue
-            if df_pag is None:
-                raise ValueError("Não foi possível ler o CSV.")
-        elif uploaded_file.name.endswith('.xlsx'):
-            # Lê o Excel considerando que a primeira linha é o cabeçalho
-            df_pag = pd.read_excel(uploaded_file)
-        else:
-            raise ValueError("Formato não suportado.")
+        df = None
 
-        if df_pag is None or df_pag.empty:
-            st.error("Arquivo de Pagamentos está vazio.")
+        # 1. LER O ARQUIVO DE FORMA SEGURA NA MEMÓRIA
+        file_bytes = uploaded_file.getvalue()
+
+        if uploaded_file.name.endswith('.parquet'):
+            df = pd.read_parquet(io.BytesIO(file_bytes))
+        elif uploaded_file.name.endswith('.csv'):
+            df = pd.read_csv(io.BytesIO(file_bytes), sep=';', encoding='latin1')
+        elif uploaded_file.name.endswith('.xlsx'):
+            df = pd.read_excel(io.BytesIO(file_bytes))
+        else:
+            st.error("Formato não suportado.")
             return None
 
-        # 2. Padronizar nomes das colunas (remover espaços extras nas pontas)
-        df_pag.columns = df_pag.columns.str.strip()
+        if df is None or df.empty:
+            st.error("O arquivo enviado está vazio ou não pôde ser lido.")
+            return None
 
-        # 3. Dicionário de mapeamento (Nome no seu arquivo -> Nome que o App precisa)
+        # 2. MAPEAMENTO DE COLUNAS
         mapeamento_colunas = {
             'Nº Ligação': 'MATRICULA_PAGAMENTO',
             'Data Pagto.': 'DATA_PAGAMENTO',
             'Valor Pago': 'VALOR_PAGO',
+            'Zona (Localidade)': 'CIDADE',
             'Tipo Pagamento': 'TIPO_PAGAMENTO',
             'Vencimento': 'VENCIMENTO',
             'Tipo Fatura': 'TIPO_FATURA',
             'Utilização (Sub. Categ.)': 'UTILIZACAO'
         }
 
-        # Renomeia as colunas que existirem no arquivo
-        df_pag.rename(columns=mapeamento_colunas, inplace=True)
+        df.rename(columns=mapeamento_colunas, inplace=True)
 
-        # Verifica se as colunas obrigatórias existem após o renomeio
+        # 3. VERIFICAÇÃO DE COLUNAS OBRIGATÓRIAS
         colunas_obrigatorias = ['MATRICULA_PAGAMENTO', 'DATA_PAGAMENTO', 'VALOR_PAGO']
-        faltando = [col for col in colunas_obrigatorias if col not in df_pag.columns]
-        if faltando:
-            st.error(f"Colunas obrigatórias não encontradas no arquivo de pagamentos: {faltando}")
+        colunas_faltantes = [col for col in colunas_obrigatorias if col not in df.columns]
+
+        if colunas_faltantes:
+            st.error(f"Arquivo de Pagamentos: colunas obrigatórias ausentes: {', '.join(colunas_faltantes)}")
             return None
 
-        # 4. Limpeza e conversão de tipos
+        df_pag = df.copy()
 
-        # Matrícula
-        df_pag['MATRICULA_PAGAMENTO'] = (
-            df_pag['MATRICULA_PAGAMENTO']
-            .astype(str)
-            .str.replace(r'\.0$', '', regex=True)
-            .str.strip()
-        )
+        # 4. TRATAMENTO DE DADOS (Garantir tipos corretos)
+        df_pag['MATRICULA_PAGAMENTO'] = df_pag['MATRICULA_PAGAMENTO'].astype(str).str.strip()
 
-        # Data de Pagamento
-        df_pag['DATA_PAGAMENTO'] = pd.to_datetime(df_pag['DATA_PAGAMENTO'], errors='coerce', dayfirst=True)
-        df_pag.dropna(subset=['DATA_PAGAMENTO'], inplace=True)
-
-        # Valor Pago (trata vírgulas e pontos se vier como string)
-        def parse_valor(val):
-            s = str(val).strip()
-            if ',' in s and '.' in s:
-                s = s.replace('.', '').replace(',', '.')
-            elif ',' in s:
-                s = s.replace(',', '.')
-            return s
-
-        df_pag['VALOR_PAGO'] = df_pag['VALOR_PAGO'].apply(parse_valor)
+        # Tratar valor pago caso venha como texto (ex: R$ 1.500,00)
+        if df_pag['VALOR_PAGO'].dtype == 'object':
+            df_pag['VALOR_PAGO'] = df_pag['VALOR_PAGO'].astype(str).str.replace('R$', '', regex=False).str.replace('.', '', regex=False).str.replace(',', '.', regex=False).str.strip()
         df_pag['VALOR_PAGO'] = pd.to_numeric(df_pag['VALOR_PAGO'], errors='coerce')
-        df_pag.dropna(subset=['VALOR_PAGO'], inplace=True)
 
-        # Colunas Opcionais
+        # Remover fuso horário (tz_localize(None)) para evitar conflitos no Parquet
+        df_pag['DATA_PAGAMENTO'] = pd.to_datetime(df_pag['DATA_PAGAMENTO'], errors='coerce', dayfirst=True).dt.tz_localize(None)
+
+        # Remover linhas inválidas
+        df_pag.dropna(subset=['MATRICULA_PAGAMENTO', 'DATA_PAGAMENTO', 'VALOR_PAGO'], inplace=True)
+
+        if df_pag.empty:
+            st.error("Após o processamento, nenhuma linha válida restou. Verifique os formatos de data e valor.")
+            return None
+
+        # 5. COLUNAS OPCIONAIS
+        if 'CIDADE' in df_pag.columns:
+            df_pag['CIDADE'] = df_pag['CIDADE'].astype(str).str.strip().replace('nan', 'Não informado')
+
         if 'TIPO_PAGAMENTO' in df_pag.columns:
             df_pag['TIPO_PAGAMENTO'] = df_pag['TIPO_PAGAMENTO'].astype(str).str.strip().replace('nan', 'Não informado')
 
         if 'VENCIMENTO' in df_pag.columns:
-            df_pag['VENCIMENTO']     = pd.to_datetime(df_pag['VENCIMENTO'], errors='coerce', dayfirst=True)
-            df_pag['MES_FATURA']     = df_pag['VENCIMENTO'].dt.month
-            df_pag['ANO_FATURA']     = df_pag['VENCIMENTO'].dt.year
+            df_pag['VENCIMENTO'] = pd.to_datetime(df_pag['VENCIMENTO'], errors='coerce', dayfirst=True).dt.tz_localize(None)
+            df_pag['MES_FATURA'] = df_pag['VENCIMENTO'].dt.month
+            df_pag['ANO_FATURA'] = df_pag['VENCIMENTO'].dt.year
             df_pag['MES_ANO_FATURA'] = df_pag['VENCIMENTO'].dt.strftime('%m/%Y')
 
         if 'TIPO_FATURA' in df_pag.columns:
