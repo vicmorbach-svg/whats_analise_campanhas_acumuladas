@@ -133,6 +133,21 @@ def parquet_bytes_to_df(content_bytes):
 META_PATH = "data/campanhas_meta.parquet"
 PAG_PATH  = "data/pagamentos.parquet"
 
+@st.cache_data(ttl=3600)
+def load_campanha_envios(campanha_id):
+    content, _ = get_file_from_github(f"data/campanhas/{campanha_id}_envios.parquet")
+    return parquet_bytes_to_df(content) if content else None
+
+@st.cache_data(ttl=3600)
+def load_campanha_clientes(campanha_id):
+    content, _ = get_file_from_github(f"data/campanhas/{campanha_id}_clientes.parquet")
+    return parquet_bytes_to_df(content) if content else None
+
+@st.cache_data(ttl=3600)
+def load_pagamentos_github():
+    content, _ = get_file_from_github(PAG_PATH)
+    return parquet_bytes_to_df(content) if content else None
+
 def load_campanhas_meta():
     content, _ = get_file_from_github(META_PATH)
     if content:
@@ -176,6 +191,8 @@ def update_campanha(campanha_id, nome, df_envios_novos=None, df_clientes_novos=N
         df_meta.at[idx[0], 'total_clientes'] = len(df_clientes_combined)
 
     save_file_to_github(META_PATH, df_to_parquet_bytes(df_meta), f"Meta: campanha {nome} atualizada")
+    load_campanha_envios.clear()
+    load_campanha_clientes.clear()
     return True, None
 
 def load_campanha_envios(campanha_id):
@@ -208,6 +225,7 @@ def update_pagamentos_github(df_novo):
     total_antes = len(df_existente) if df_existente is not None else 0
     novos = len(df_combined) - total_antes
     ok = save_file_to_github(PAG_PATH, df_to_parquet_bytes(df_combined), "Pagamentos: atualização")
+    load_pagamentos_github.clear() 
     return ok, len(df_combined), novos
 
 # ══════════════════════════════════════════════════════════════
