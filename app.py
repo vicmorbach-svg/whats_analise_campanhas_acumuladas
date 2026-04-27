@@ -134,11 +134,6 @@ META_PATH = "data/campanhas_meta.parquet"
 PAG_PATH  = "data/pagamentos.parquet"
 
 
-
-
-
-
-
 def load_campanhas_meta():
     content, _ = get_file_from_github(META_PATH)
     if content:
@@ -191,15 +186,7 @@ def load_campanha_envios(campanha_id):
     content, _ = get_file_from_github(f"data/campanhas/{campanha_id}_envios.parquet")
     return parquet_bytes_to_df(content) if content else None
 
-def load_campanha_envios(campanha_id):
-    content, _ = get_file_from_github(f"data/campanhas/{campanha_id}_envios.parquet")
-    return parquet_bytes_to_df(content) if content else None
-
 @st.cache_data(ttl=3600)
-def load_campanha_clientes(campanha_id):
-    content, _ = get_file_from_github(f"data/campanhas/{campanha_id}_clientes.parquet")
-    return parquet_bytes_to_df(content) if content else None
-
 def load_campanha_clientes(campanha_id):
     content, _ = get_file_from_github(f"data/campanhas/{campanha_id}_clientes.parquet")
     return parquet_bytes_to_df(content) if content else None
@@ -212,10 +199,6 @@ def delete_campanha(campanha_id, nome):
     delete_file_from_github(f"data/campanhas/{campanha_id}_clientes.parquet", f"Removendo clientes {nome}")
 
 @st.cache_data(ttl=3600)
-def load_pagamentos_github():
-    content, _ = get_file_from_github(PAG_PATH)
-    return parquet_bytes_to_df(content) if content else None
-
 def load_pagamentos_github():
     content, _ = get_file_from_github(PAG_PATH)
     return parquet_bytes_to_df(content) if content else None
