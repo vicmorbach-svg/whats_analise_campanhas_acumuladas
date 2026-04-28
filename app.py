@@ -579,12 +579,22 @@ if executar_analise and dados_prontos:
         col1, col2, col3 = st.columns(3)
         col1.metric("Total de clientes notificados",   f"{total_clientes_notificados:,}")
         col2.metric("Clientes que pagaram na janela",  f"{clientes_que_pagaram_matriculas:,}")
-        col3.metric("Taxa de eficiência (clientes)",   f"{taxa_eficiencia_clientes:,.2f}%".replace(",", "X").replace(".", ",").replace("X", "."), border=True)
+        col3.metric(f"""
+            <div style="background-color: #cce5ff; padding: 15px; border-radius: 10px; border: 1px solid #b8daff;">
+                <p style="margin:0; color: #004085; font-size: 14px;">Taxa de eficiência (Clientes)</p>
+                <h2 style="margin:0; color: #004085;">{taxa_eficiencia_clientes:,.2f}%</h2>
+            </div>
+        """.replace(",", "X").replace(".", ",").replace("X", "."), unsafe_allow_html=True)
 
         col4, col5, col6 = st.columns(3)
         col4.metric("Valor total arrecadado",          fmt_brl(valor_total_arrecadado))
         col5.metric("Total da dívida dos notificados", fmt_brl(total_divida_notificados))
-        col6.metric("Taxa de eficiência (valor)",      f"{taxa_eficiencia_valor:,.2f}%".replace(",", "X").replace(".", ",").replace("X", "."), border=True)
+        col6.metric(f"""
+            <div style="background-color: #cce5ff; padding: 15px; border-radius: 10px; border: 1px solid #b8daff;">
+                <p style="margin:0; color: #004085; font-size: 14px;">Taxa de eficiência (Valor)</p>
+                <h2 style="margin:0; color: #004085;">{taxa_eficiencia_valor:,.2f}%</h2>
+            </div>
+        """.replace(",", "X").replace(".", ",").replace("X", "."), unsafe_allow_html=True)
 
         col7, col8, col9 = st.columns(3)
         col7.metric("Ticket médio",     fmt_brl(ticket_medio))
