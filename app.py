@@ -601,8 +601,8 @@ if executar_analise and dados_prontos:
         col3.metric("Taxa de eficiência (Clientes)",   f"{taxa_eficiencia_clientes:,.2f}%".replace(",", "X").replace(".", ",").replace("X", "."), border=True)
 
         col4, col5, col6 = st.columns(3)
-        col4.metric("Valor total arrecadado",          fmt_brl(valor_total_arrecadado))
-        col5.metric("Total da dívida dos notificados", fmt_brl(total_divida_notificados))
+        col4.metric("Total da dívida dos notificados", fmt_brl(total_divida_notificados))
+        col5.metric("Valor total arrecadado",          fmt_brl(valor_total_arrecadado))
         col6.metric("Taxa de eficiência (Valor)",   f"{taxa_eficiencia_valor:,.2f}%".replace(",", "X").replace(".", ",").replace("X", "."), border=True)
 
         col7, col8, col9 = st.columns(3)
