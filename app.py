@@ -8,6 +8,19 @@ import requests
 import json
 import uuid
 import gc
+import datetime
+import pytz
+
+# Configura o fuso horário do Brasil
+fuso_br = pytz.timezone('America/Sao_Paulo')
+hora_atual = datetime.datetime.now(fuso_br).hour
+
+# Define o funcionamento das 08h às 18h (por exemplo)
+if hora_atual < 8 or hora_atual >= 18:
+    st.title("🌙 Sistema em Repouso")
+    st.info("O painel de análise funciona apenas das 08h às 18h para economia de recursos.")
+    st.stop() # Interrompe a execução de todo o resto do código abaixo
+
 
 # ══════════════════════════════════════════════════════════════
 # SISTEMA DE LOGIN
