@@ -181,12 +181,12 @@ def update_campanha(campanha_id, nome, df_envios_novos=None, df_clientes_novos=N
     load_campanha_clientes.clear()
     return True, None
 
-@st.cache_data(ttl=3600)
+@st.cache_data(ttl=3600, max_entries=2)
 def load_campanha_envios(campanha_id):
     content, _ = get_file_from_github(f"data/campanhas/{campanha_id}_envios.parquet")
     return parquet_bytes_to_df(content) if content else None
 
-@st.cache_data(ttl=3600)
+@st.cache_data(ttl=3600, max_entries=2)
 def load_campanha_clientes(campanha_id):
     content, _ = get_file_from_github(f"data/campanhas/{campanha_id}_clientes.parquet")
     return parquet_bytes_to_df(content) if content else None
@@ -198,7 +198,7 @@ def delete_campanha(campanha_id, nome):
     delete_file_from_github(f"data/campanhas/{campanha_id}_envios.parquet", f"Removendo envios {nome}")
     delete_file_from_github(f"data/campanhas/{campanha_id}_clientes.parquet", f"Removendo clientes {nome}")
 
-@st.cache_data(ttl=3600)
+@st.cache_data(ttl=3600, max_entries=2)
 def load_pagamentos_github():
     content, _ = get_file_from_github(PAG_PATH)
     return parquet_bytes_to_df(content) if content else None
@@ -367,7 +367,13 @@ def load_and_process_pagamentos(uploaded_file):
 
         if 'UTILIZACAO' in df_pag.columns:
             df_pag['UTILIZACAO'] = df_pag['UTILIZACAO'].astype(str).str.strip().replace('nan', 'Não informado')
-
+            
+        # Otimização de Memória (Downcasting)
+        colunas_categoricas = ['CIDADE', 'TIPO_PAGAMENTO', 'TIPO_FATURA', 'UTILIZACAO']
+        for col in colunas_categoricas:
+            if col in df_pag.columns:
+                df_pag[col] = df_pag[col].astype('category')
+                
         return df_pag
 
     except Exception as e:
