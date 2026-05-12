@@ -240,8 +240,24 @@ def update_pagamentos_github(df_novo):
 def load_and_process_envios(uploaded_file):
     try:
         df = pd.read_excel(uploaded_file)
-        df_envios = df[['To', 'Send At']].copy()
-        df_envios.rename(columns={'To': 'TELEFONE_ENVIO', 'Send At': 'DATA_ENVIO'}, inplace=True)
+
+        # Verifica se a coluna Reason existe no arquivo
+        colunas_ler = ['To', 'Send At']
+        if 'Reason' in df.columns:
+            colunas_ler.append('Reason')
+
+        df_envios = df[colunas_ler].copy()
+
+        renomear = {'To': 'TELEFONE_ENVIO', 'Send At': 'DATA_ENVIO'}
+        if 'Reason' in df.columns:
+            renomear['Reason'] = 'STATUS_ENVIO'
+
+        df_envios.rename(columns=renomear, inplace=True)
+
+        # Fallback: se for um arquivo antigo sem a coluna Reason, assume que todos foram entregues
+        if 'STATUS_ENVIO' not in df_envios.columns:
+            df_envios['STATUS_ENVIO'] = 'DELIVERED_TO_HANDSET'
+            
         df_envios['TELEFONE_ENVIO'] = df_envios['TELEFONE_ENVIO'].astype(str).str.replace(r'^55|\.0$', '', regex=True).str.strip()
         df_envios['DATA_ENVIO'] = pd.to_datetime(df_envios['DATA_ENVIO'], errors='coerce', dayfirst=True)
         df_envios.dropna(subset=['DATA_ENVIO'], inplace=True)
@@ -504,6 +520,11 @@ if executar_analise and dados_prontos:
 
     # ── Cruzamento envios x clientes ──────────────────────────
     total_clientes_notificados = df_envios['TELEFONE_ENVIO'].nunique()
+    total_clientes_notificados = df_envios[df_envios['STATUS_ENVIO'] == 'DELIVERED_TO_HANDSET']['TELEFONE_ENVIO'].nunique()
+    total_envios_rejeitados    = df_envios[df_envios['STATUS_ENVIO'].isin(['REJECTED_NETWORK', 'REJECTED_DUPLICATE_MESSAGE'])]['TELEFONE_ENVIO'].nunique()
+    taxa_eficiencia_disparos   = (total_clientes_notificados / total_clientes_base_envios * 100) if total_clientes_base_envios > 0 else 0
+
+    
 
     df_merge = pd.merge(
         df_envios,
@@ -517,11 +538,17 @@ if executar_analise and dados_prontos:
         st.error("Nenhum cliente encontrado após cruzamento entre envios e clientes.")
         st.stop()
 
-    total_divida_notificados = df_merge['SITUACAO'].sum()
+    
 
     # Garante tipo string nos campos de matrícula para o merge
     df_merge['MATRICULA_CLIENTE'] = df_merge['MATRICULA_CLIENTE'].astype(str).str.strip()
     df_pagamentos['MATRICULA_PAGAMENTO'] = df_pagamentos['MATRICULA_PAGAMENTO'].astype(str).str.strip()
+
+    # ── Cálculos de Dívida (Removendo duplicatas por cliente) ──
+    total_divida_base_envios = df_merge.drop_duplicates(subset=['MATRICULA_CLIENTE'])['SITUACAO'].sum()
+
+    df_entregues = df_merge[df_merge['STATUS_ENVIO'] == 'DELIVERED_TO_HANDSET']
+    total_divida_notificados = df_entregues.drop_duplicates(subset=['MATRICULA_CLIENTE'])['SITUACAO'].sum()
 
     # ── OTIMIZAÇÃO DE MEMÓRIA: Pré-filtragem ──────────────────
     # Descobre quais matrículas realmente importam para esta campanha
@@ -576,10 +603,12 @@ if executar_analise and dados_prontos:
     # ── Métricas ──────────────────────────────────────────────
     clientes_que_pagaram_matriculas = df_pagamentos_campanha['MATRICULA'].nunique()
     valor_total_arrecadado          = df_pagamentos_campanha['VALOR_PAGO'].sum() if not df_pagamentos_campanha.empty else 0
-    taxa_eficiencia_clientes        = (clientes_que_pagaram_matriculas / total_clientes_notificados * 100) if total_clientes_notificados > 0 else 0
-    taxa_eficiencia_valor           = (valor_total_arrecadado / total_divida_notificados * 100) if total_divida_notificados > 0 else 0
+    taxa_eficiencia_clientes_notificados        = (clientes_que_pagaram_matriculas / total_clientes_notificados * 100) if total_clientes_notificados > 0 else 0
+    taxa_eficiencia_valor_notificados           = (valor_total_arrecadado / total_divida_notificados * 100) if total_divida_notificados > 0 else 0
+    taxa_eficiencia_clientes_base        = (clientes_que_pagaram_matriculas / total_clientes_base_envios * 100) if total_clientes_base_envios > 0 else 0
+    taxa_eficiencia_valor_base           = (valor_total_arrecadado / total_divida_base_envios * 100) if total_divida_base_envios > 0 else 0
     ticket_medio                    = (valor_total_arrecadado / clientes_que_pagaram_matriculas) if clientes_que_pagaram_matriculas > 0 else 0
-    custo_campanha                  = total_clientes_notificados * 0.05
+    custo_campanha                  = total_clientes_base_envios * 0.05
     roi                             = ((valor_total_arrecadado - custo_campanha) / custo_campanha * 100) if custo_campanha > 0 else 0
 
     # ── Abas ─────────────────────────────────────────────────
@@ -597,20 +626,30 @@ if executar_analise and dados_prontos:
     with aba1:
         st.subheader("Resultados da Análise da Campanha")
 
-        col1, col2, col3 = st.columns(3)
-        col1.metric("Total de clientes notificados",   f"{total_clientes_notificados:,}")
-        col2.metric("Clientes que pagaram na janela",  f"{clientes_que_pagaram_matriculas:,}")
-        col3.metric("Taxa de eficiência (Clientes)",   f"{taxa_eficiencia_clientes:,.2f}%".replace(",", "X").replace(".", ",").replace("X", "."), border=True)
+        st.markdown("##### 📱 Funil de Disparos")
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric("Clientes na base de envios", f"{total_clientes_base_envios:,}")
+        col2.metric("Clientes notificados", f"{total_clientes_notificados:,}")
+        col3.metric("Envios rejeitados", f"{total_envios_rejeitados:,}")
+        col4.metric("Eficiência dos disparos", f"{taxa_eficiencia_disparos:,.2f}%".replace(",", "X").replace(".", ",").replace("X", "."))
 
-        col4, col5, col6 = st.columns(3)
-        col4.metric("Total da dívida dos notificados", fmt_brl(total_divida_notificados))
-        col5.metric("Valor total arrecadado",          fmt_brl(valor_total_arrecadado))
-        col6.metric("Taxa de eficiência (Valor)",   f"{taxa_eficiencia_valor:,.2f}%".replace(",", "X").replace(".", ",").replace("X", "."), border=True)
+        st.markdown("##### 💰 Conversão e Arrecadação")
+        col5 = st.columns(1)
+        col5.metric("Clientes que pagaram",   f"{clientes_que_pagaram_matriculas:,}")
 
-        col7, col8, col9 = st.columns(3)
-        col7.metric("Ticket médio",     fmt_brl(ticket_medio))
-        col8.metric("Custo da campanha", fmt_brl(custo_campanha))
-        col9.metric("ROI",              f"{roi:,.2f}%".replace(",", "X").replace(".", ",").replace("X", "."))
+        col6, col7 - st.columns(2)
+        col6.metric("Taxa de eficiência base envios",  f"{taxa_eficiencia_clientes_base_envios:,.2f}%".replace(",", "X").replace(".", ",").replace("X", "."), border=True)
+        col7.metric("Taxa de eficiência clientes notificados",  f"{taxa_eficiencia_clientes_notificados:,.2f}%".replace(",", "X").replace(".", ",").replace("X", "."), border=True)
+
+        col8, col9, col10 = st.columns(3)
+        col8.metric("Dívida total da base", fmt_brl(total_divida_base_envios))
+        col9.metric("Dívida dos notificados", fmt_brl(total_divida_notificado))
+        col10.metric("Valor total arrecadado",          fmt_brl(valor_total_arrecadado))
+
+        col11, col12, col13 = st.columns(3)  
+        col11.metric("Ticket médio",   fmt_brl(ticket_medio))
+        col12.metric("Custo da campanha", fmt_brl(custo_campanha))
+        col13.metric("ROI",              f"{roi:,.2f}%".replace(",", "X").replace(".", ",").replace("X", "."))
 
         if not df_pagamentos_campanha.empty:
             st.subheader(f"Pagamentos por Dia Após o Envio (Janela de {janela_dias} dias)")
