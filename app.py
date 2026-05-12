@@ -17,6 +17,7 @@ hora_atual = datetime.datetime.now(fuso_br).hour
 
 # Define o funcionamento das 08h às 18h (por exemplo)
 if hora_atual < 8 or hora_atual >= 18:
+    st.cache_data.clear()
     st.title("🌙 Sistema em Repouso")
     st.info("O painel de análise funciona apenas das 08h às 18h para economia de recursos.")
     st.stop() # Interrompe a execução de todo o resto do código abaixo
@@ -130,12 +131,12 @@ def df_to_parquet_bytes(df):
     buf.seek(0)
     return buf.getvalue()
 
-def parquet_bytes_to_df(content_bytes):
+def parquet_bytes_to_df(content_bytes, colunas=None):
     if not content_bytes: return None
     try:
         buf = io.BytesIO(content_bytes)
         buf.seek(0)
-        return pd.read_parquet(buf, engine='pyarrow')
+        return pd.read_parquet(buf, engine='pyarrow', columns=colunas)
     except:
         return None
 
@@ -211,9 +212,10 @@ def delete_campanha(campanha_id, nome):
     delete_file_from_github(f"data/campanhas/{campanha_id}_envios.parquet", f"Removendo envios {nome}")
     delete_file_from_github(f"data/campanhas/{campanha_id}_clientes.parquet", f"Removendo clientes {nome}")
 
-@st.cache_data(ttl=3600, max_entries=2)
+@st.cache_data(ttl=900, max_entries=1)
 def load_pagamentos_github():
     content, _ = get_file_from_github(PAG_PATH)
+    colunas_uteis = ["MATRICULA_PAGAMENTO", "DATA_PAGAMENTO", "VALOR_PAGO", "CIDADE", "TIPO_PAGAMENTO", "VENCIMENTO"]
     return parquet_bytes_to_df(content) if content else None
 
 def update_pagamentos_github(df_novo):
