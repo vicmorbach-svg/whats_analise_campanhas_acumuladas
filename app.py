@@ -239,7 +239,12 @@ def update_pagamentos_github(df_novo):
 @st.cache_data
 def load_and_process_envios(uploaded_file):
     try:
-        df = pd.read_excel(uploaded_file)
+        # Verifica a extensão para ler corretamente
+        if uploaded_file.name.endswith('.parquet'):
+            file_bytes = uploaded_file.read()
+            df = pd.read_parquet(io.BytesIO(file_bytes), engine='pyarrow')
+        else:
+            df = pd.read_excel(uploaded_file)
 
         # Verifica se a coluna Reason existe no arquivo
         colunas_ler = ['To', 'Send At']
@@ -269,7 +274,13 @@ def load_and_process_envios(uploaded_file):
 @st.cache_data
 def load_and_process_clientes(uploaded_file):
     try:
-        df = pd.read_excel(uploaded_file)
+        # Verifica a extensão para ler corretamente
+        if uploaded_file.name.endswith('.parquet'):
+            file_bytes = uploaded_file.read()
+            df = pd.read_parquet(io.BytesIO(file_bytes), engine='pyarrow')
+        else:
+            df = pd.read_excel(uploaded_file)
+            
         colunas_ler = ['TELEFONE', 'MATRICULA', 'SITUACAO']
         for col in ['CIDADE', 'DIRETORIA']:
             if col in df.columns: colunas_ler.append(col)
@@ -466,8 +477,8 @@ if is_admin():
     st.sidebar.header("🔧 Administração")
     with st.sidebar.expander("➕ Nova Campanha"):
         nome_nova = st.text_input("Nome da campanha")
-        up_env = st.file_uploader("Envios (.xlsx)", type=["xlsx"], key="n_env")
-        up_cli = st.file_uploader("Clientes (.xlsx)", type=["xlsx"], key="n_cli")
+        up_env = st.file_uploader("Envios (.xlsx, .parquet)", type=["xlsx", "parquet"], key="n_env")
+        up_cli = st.file_uploader("Clientes (.xlsx, .parquet)", type=["xlsx", "parquet"], key="n_cli")
         if st.button("Salvar campanha") and nome_nova and up_env and up_cli:
             save_campanha(nome_nova, load_and_process_envios(up_env), load_and_process_clientes(up_cli))
             st.success("Campanha salva!")
@@ -476,8 +487,8 @@ if is_admin():
     with st.sidebar.expander("🔄 Atualizar Campanha"):
         if not df_meta.empty:
             camp_upd = st.selectbox("Campanha", df_meta['nome'].tolist())
-            up_env_u = st.file_uploader("Novos Envios", type=["xlsx"], key="u_env")
-            up_cli_u = st.file_uploader("Novos Clientes", type=["xlsx"], key="u_cli")
+            up_env_u = st.file_uploader("Novos Envios", type=["xlsx", "parquet"], key="u_env")
+            up_cli_u = st.file_uploader("Novos Clientes", type=["xlsx", "parquet"], key="u_cli")
             if st.button("Atualizar") and (up_env_u or up_cli_u):
                 cid = df_meta[df_meta['nome'] == camp_upd].iloc[0]['id']
                 update_campanha(cid, camp_upd, load_and_process_envios(up_env_u) if up_env_u else None, load_and_process_clientes(up_cli_u) if up_cli_u else None)
