@@ -203,7 +203,8 @@ def load_campanha_envios(campanha_id):
 @st.cache_data(ttl=3600, max_entries=2)
 def load_campanha_clientes(campanha_id):
     content, _ = get_file_from_github(f"data/campanhas/{campanha_id}_clientes.parquet")
-    return parquet_bytes_to_df(content) if content else None
+    colunas_cli = ['TELEFONE_CLIENTE', 'MATRICULA_CLIENTE', 'SITUACAO', 'CIDADE', 'DIRETORIA']
+    return parquet_bytes_to_df(content, colunas=colunas_cli) if content else None
 
 def delete_campanha(campanha_id, nome):
     df_meta = load_campanhas_meta()
@@ -215,8 +216,24 @@ def delete_campanha(campanha_id, nome):
 @st.cache_data(ttl=900, max_entries=1)
 def load_pagamentos_github():
     content, _ = get_file_from_github(PAG_PATH)
+    if not content: return None
+
+    # Passando as colunas para ler APENAS o necessário
     colunas_uteis = ["MATRICULA_PAGAMENTO", "DATA_PAGAMENTO", "VALOR_PAGO", "CIDADE", "TIPO_PAGAMENTO", "VENCIMENTO"]
-    return parquet_bytes_to_df(content) if content else None
+    df = parquet_bytes_to_df(content, colunas=colunas_uteis)
+
+    if df is not None:
+        # Downcasting imediato (converte textos repetidos em categorias leves)
+        colunas_categoricas = ['CIDADE', 'TIPO_PAGAMENTO']
+        for col in colunas_categoricas:
+            if col in df.columns:
+                df[col] = df[col].astype('category')
+
+        # Reduz o peso da coluna de valor
+        if 'VALOR_PAGO' in df.columns:
+            df['VALOR_PAGO'] = pd.to_numeric(df['VALOR_PAGO'], downcast='float')
+
+    return df
 
 def update_pagamentos_github(df_novo):
     df_existente = load_pagamentos_github()
@@ -570,6 +587,7 @@ if executar_analise and dados_prontos:
 
     # Libera a memória da base gigante original (opcional, mas recomendado)
     del df_pagamentos
+    load_pagamentos_github.clear()
     gc.collect() # Força a limpeza da RAM
 
     # ── Cruzamento final (agora muito mais leve) ──────────────
