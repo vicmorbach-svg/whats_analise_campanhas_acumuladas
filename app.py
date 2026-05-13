@@ -639,7 +639,6 @@ if executar_analise and dados_prontos:
     ticket_medio                    = (valor_total_arrecadado / clientes_que_pagaram_matriculas) if clientes_que_pagaram_matriculas > 0 else 0
     custo_campanha                  = total_clientes_base_envios * 0.05
     roi                             = ((valor_total_arrecadado - custo_campanha) / custo_campanha * 100) if custo_campanha > 0 else 0
-
     # ── Abas ─────────────────────────────────────────────────
     aba1, aba2, aba3, aba4, aba5 = st.tabs([
         "📊 Visão Geral",
@@ -675,10 +674,14 @@ if executar_analise and dados_prontos:
         col9.metric("Dívida dos notificados", fmt_brl(total_divida_notificados))
         col10.metric("Valor total arrecadado",          fmt_brl(valor_total_arrecadado))
 
-        col11, col12, col13 = st.columns(3)  
-        col11.metric("Ticket médio",   fmt_brl(ticket_medio))
-        col12.metric("Custo da campanha", fmt_brl(custo_campanha))
-        col13.metric("ROI",              f"{roi:,.2f}%".replace(",", "X").replace(".", ",").replace("X", "."))
+        col11, col12 = st.columns(2)
+        col11.metric("Taxa eficiênica dívida total", f"{taxa_eficiencia_valor_base:,.2f}%".replace(",", "X").replace(".", ",").replace("X", "."), border=True)
+        col12.metric("Taxa eficiênica dívida notificada", f"{taxa_eficiencia_valor_notificados:,.2f}%".replace(",", "X").replace(".", ",").replace("X", "."), border=True)
+
+        col13, col14, col15 = st.columns(3)  
+        col13.metric("Ticket médio",   fmt_brl(ticket_medio))
+        col14.metric("Custo da campanha", fmt_brl(custo_campanha))
+        col15.metric("ROI",              f"{roi:,.2f}%".replace(",", "X").replace(".", ",").replace("X", "."))
 
         if not df_pagamentos_campanha.empty:
             st.subheader(f"Pagamentos por Dia Após o Envio (Janela de {janela_dias} dias)")
