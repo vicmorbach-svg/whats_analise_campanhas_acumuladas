@@ -550,7 +550,7 @@ if executar_analise and dados_prontos:
     total_clientes_unicos_base_envios = df_envios['TELEFONE_ENVIO'].nunique()
     total_base_envio = df_envios['TELEFONE_ENVIO'].count()
     total_clientes_notificados = df_envios[df_envios['STATUS_ENVIO'] == 'DELIVERED_TO_HANDSET']['TELEFONE_ENVIO'].nunique()
-    total_envios_rejeitados    = df_envios[df_envios['STATUS_ENVIO'].isin(['REJECTED_NETWORK', 'REJECTED_DUPLICATE_MESSAGE'])]['TELEFONE_ENVIO'].nunique()
+    total_envios_rejeitados    = df_envios[df_envios['STATUS_ENVIO'] != 'DELIVERED_TO_HANDSET']['TELEFONE_ENVIO'].count()
     taxa_eficiencia_disparos   = (total_clientes_notificados / total_clientes_unicos_base_envios * 100) if total_clientes_unicos_base_envios > 0 else 0
 
     
