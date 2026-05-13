@@ -530,7 +530,7 @@ if campanha_selecionada is not None:
 if executar_analise and dados_prontos:
 
     # ── Cruzamento envios x clientes ──────────────────────────
-    total_clientes_notificados = df_envios['TELEFONE_ENVIO'].nunique()
+    total_clientes_base_envios = df_envios['TELEFONE_ENVIO'].nunique()
     total_clientes_notificados = df_envios[df_envios['STATUS_ENVIO'] == 'DELIVERED_TO_HANDSET']['TELEFONE_ENVIO'].nunique()
     total_envios_rejeitados    = df_envios[df_envios['STATUS_ENVIO'].isin(['REJECTED_NETWORK', 'REJECTED_DUPLICATE_MESSAGE'])]['TELEFONE_ENVIO'].nunique()
     taxa_eficiencia_disparos   = (total_clientes_notificados / total_clientes_base_envios * 100) if total_clientes_base_envios > 0 else 0
@@ -616,7 +616,7 @@ if executar_analise and dados_prontos:
     valor_total_arrecadado          = df_pagamentos_campanha['VALOR_PAGO'].sum() if not df_pagamentos_campanha.empty else 0
     taxa_eficiencia_clientes_notificados        = (clientes_que_pagaram_matriculas / total_clientes_notificados * 100) if total_clientes_notificados > 0 else 0
     taxa_eficiencia_valor_notificados           = (valor_total_arrecadado / total_divida_notificados * 100) if total_divida_notificados > 0 else 0
-    taxa_eficiencia_clientes_base        = (clientes_que_pagaram_matriculas / total_clientes_base_envios * 100) if total_clientes_base_envios > 0 else 0
+    taxa_eficiencia_clientes_base_envios        = (clientes_que_pagaram_matriculas / total_clientes_base_envios * 100) if total_clientes_base_envios > 0 else 0
     taxa_eficiencia_valor_base           = (valor_total_arrecadado / total_divida_base_envios * 100) if total_divida_base_envios > 0 else 0
     ticket_medio                    = (valor_total_arrecadado / clientes_que_pagaram_matriculas) if clientes_que_pagaram_matriculas > 0 else 0
     custo_campanha                  = total_clientes_base_envios * 0.05
@@ -648,13 +648,13 @@ if executar_analise and dados_prontos:
         col5 = st.columns(1)
         col5.metric("Clientes que pagaram",   f"{clientes_que_pagaram_matriculas:,}")
 
-        col6, col7 - st.columns(2)
+        col6, col7 = st.columns(2)
         col6.metric("Taxa de eficiência base envios",  f"{taxa_eficiencia_clientes_base_envios:,.2f}%".replace(",", "X").replace(".", ",").replace("X", "."), border=True)
         col7.metric("Taxa de eficiência clientes notificados",  f"{taxa_eficiencia_clientes_notificados:,.2f}%".replace(",", "X").replace(".", ",").replace("X", "."), border=True)
 
         col8, col9, col10 = st.columns(3)
         col8.metric("Dívida total da base", fmt_brl(total_divida_base_envios))
-        col9.metric("Dívida dos notificados", fmt_brl(total_divida_notificado))
+        col9.metric("Dívida dos notificados", fmt_brl(total_divida_notificados))
         col10.metric("Valor total arrecadado",          fmt_brl(valor_total_arrecadado))
 
         col11, col12, col13 = st.columns(3)  
