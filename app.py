@@ -663,7 +663,7 @@ if executar_analise and dados_prontos:
         col4.metric("Eficiência dos disparos", f"{taxa_eficiencia_disparos:,.2f}%".replace(",", "X").replace(".", ",").replace("X", "."))
 
         st.markdown("##### 💰 Conversão e Arrecadação")
-        col5 = st.columns(1)
+        col5, = st.columns(1)
         col5.metric("Clientes que pagaram",   f"{clientes_que_pagaram_matriculas:,}")
 
         col6, col7 = st.columns(2)
