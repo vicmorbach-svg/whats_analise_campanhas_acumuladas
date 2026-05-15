@@ -901,7 +901,7 @@ if executar_analise and dados_prontos:
                 labels={'DIAS_APOS_ENVIO': 'Dias Após o Envio', 'VALOR_ACUMULADO': 'Valor Acumulado (R$)'},
                 markers=True
             )
-            st.plotly_chart(fig_acumulado, use_container_width=True, KEY="fig_acumulado_aba6")
+            st.plotly_chart(fig_acumulado, use_container_width=True, key="fig_acumulado_aba6")
 
             # 2. Canal de Pagamento por Cidade (Gráfico Empilhado)
             if 'CIDADE' in df_pagamentos_campanha.columns and 'TIPO_PAGAMENTO' in df_pagamentos_campanha.columns:
