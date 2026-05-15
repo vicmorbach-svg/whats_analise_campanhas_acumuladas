@@ -642,12 +642,13 @@ if executar_analise and dados_prontos:
     custo_campanha                  = total_base_envio * 0.05
     roi                             = ((valor_total_arrecadado - custo_campanha) / custo_campanha * 100) if custo_campanha > 0 else 0
     # ── Abas ─────────────────────────────────────────────────
-    aba1, aba2, aba3, aba4, aba5 = st.tabs([
+    aba1, aba2, aba3, aba4, aba5, aba6 = st.tabs([
         "📊 Visão Geral",
         "🏙️ Cidade e Diretoria",
         "📅 Análise das Faturas",
         "💳 Canal de Pagamento",
         "📋 Detalhes"
+        "🧪 Novas Visualizações"
     ])
 
     # ══════════════════════════════════════════════════════════
@@ -683,7 +684,7 @@ if executar_analise and dados_prontos:
 
         col14, col15, col16, col17 = st.columns(4)  
         col14.metric("Ticket médio",   fmt_brl(ticket_medio))
-        col15.metric("Total de disparos", f"{total_base_envio}")
+        col15.metric("Total de disparos", f"{total_base_envio:,}")
         col16.metric("Custo da campanha", fmt_brl(custo_campanha))
         col17.metric("ROI",              f"{roi:,.2f}%".replace(",", "X").replace(".", ",").replace("X", "."))
 
@@ -813,6 +814,36 @@ if executar_analise and dados_prontos:
             tab_canal.columns = ['Canal de Pagamento', 'Valor Total Pago', 'Clientes que Pagaram']
             tab_canal['Valor Total Pago'] = tab_canal['Valor Total Pago'].apply(fmt_brl)
             st.dataframe(tab_canal, use_container_width=True, hide_index=True)
+
+            # --- NOVO: Cruzamento de Canal por Diretoria e Cidade ---
+            tem_cidade    = 'CIDADE'    in df_pagamentos_campanha.columns
+            tem_diretoria = 'DIRETORIA' in df_pagamentos_campanha.columns
+
+            if tem_diretoria:
+                st.subheader("Canal de Pagamento por Diretoria")
+                canal_diretoria = df_pagamentos_campanha.groupby(['DIRETORIA', 'TIPO_PAGAMENTO'])['VALOR_PAGO'].sum().reset_index()
+                fig_canal_dir = px.bar(
+                    canal_diretoria, x='DIRETORIA', y='VALOR_PAGO', color='TIPO_PAGAMENTO',
+                    title='Valor Arrecadado: Diretoria x Canal de Pagamento',
+                    labels={'DIRETORIA': 'Diretoria', 'VALOR_PAGO': 'Valor (R$)', 'TIPO_PAGAMENTO': 'Canal'},
+                    barmode='stack' # Empilha as barras para ver a composição
+                )
+                st.plotly_chart(fig_canal_dir, use_container_width=True)
+
+            if tem_cidade:
+                st.subheader("Canal de Pagamento por Cidade")
+                canal_cidade = df_pagamentos_campanha.groupby(['CIDADE', 'TIPO_PAGAMENTO'])['VALOR_PAGO'].sum().reset_index()
+                # Ordena para as cidades com maior arrecadação aparecerem primeiro
+                ordem_cidades = canal_cidade.groupby('CIDADE')['VALOR_PAGO'].sum().sort_values(ascending=False).index
+                fig_canal_cid = px.bar(
+                    canal_cidade, x='CIDADE', y='VALOR_PAGO', color='TIPO_PAGAMENTO',
+                    title='Valor Arrecadado: Cidade x Canal de Pagamento',
+                    labels={'CIDADE': 'Cidade', 'VALOR_PAGO': 'Valor (R$)', 'TIPO_PAGAMENTO': 'Canal'},
+                    barmode='stack',
+                    category_orders={'CIDADE': ordem_cidades}
+                )
+                st.plotly_chart(fig_canal_cid, use_container_width=True)            
+        
         else:
             st.info("Coluna 'TIPO_PAGAMENTO' não encontrada no arquivo de pagamentos.")
 
@@ -845,6 +876,81 @@ if executar_analise and dados_prontos:
             )
         else:
             st.info("Nenhum pagamento encontrado dentro da janela definida para a campanha.")
+
+
+    # ══════════════════════════════════════════════════════════
+    # ABA 6 — NOVAS VISUALIZAÇÕES (LABORATÓRIO)
+    # ══════════════════════════════════════════════════════════
+    with aba6:
+        if not df_pagamentos_campanha.empty:
+            st.header("Exploração de Novas Visualizações")
+            st.markdown("Avalie estes gráficos. Os que forem úteis podem ser movidos para as abas principais depois.")
+
+            # 1. Curva de Arrecadação Acumulada
+            st.subheader("📈 Curva de Arrecadação Acumulada")
+            df_acumulado = df_pagamentos_campanha.groupby('DIAS_APOS_ENVIO')['VALOR_PAGO'].sum().reset_index()
+            df_acumulado['VALOR_ACUMULADO'] = df_acumulado['VALOR_PAGO'].cumsum()
+            fig_acumulado = px.line(
+                df_acumulado, x='DIAS_APOS_ENVIO', y='VALOR_ACUMULADO',
+                title='Evolução da Arrecadação (Acumulada ao longo dos dias)',
+                labels={'DIAS_APOS_ENVIO': 'Dias Após o Envio', 'VALOR_ACUMULADO': 'Valor Acumulado (R$)'},
+                markers=True
+            )
+            st.plotly_chart(fig_acumulado, use_container_width=True)
+
+            # 2. Canal de Pagamento por Cidade (Gráfico Empilhado)
+            if 'CIDADE' in df_pagamentos_campanha.columns and 'TIPO_PAGAMENTO' in df_pagamentos_campanha.columns:
+                st.subheader("🏙️ Canal de Pagamento por Cidade")
+                canal_cidade = df_pagamentos_campanha.groupby(['CIDADE', 'TIPO_PAGAMENTO'])['VALOR_PAGO'].sum().reset_index()
+                ordem_cidades = canal_cidade.groupby('CIDADE')['VALOR_PAGO'].sum().sort_values(ascending=False).index
+                fig_canal_cid = px.bar(
+                    canal_cidade, x='CIDADE', y='VALOR_PAGO', color='TIPO_PAGAMENTO',
+                    title='Valor Arrecadado: Cidade x Canal de Pagamento',
+                    labels={'CIDADE': 'Cidade', 'VALOR_PAGO': 'Valor (R$)', 'TIPO_PAGAMENTO': 'Canal'},
+                    barmode='stack',
+                    category_orders={'CIDADE': ordem_cidades}
+                )
+                st.plotly_chart(fig_canal_cid, use_container_width=True)
+
+            # 3. Ticket Médio por Cidade
+            if 'CIDADE' in df_pagamentos_campanha.columns:
+                st.subheader("🎫 Ticket Médio por Cidade")
+                tm_cidade = df_pagamentos_campanha.groupby('CIDADE').agg(
+                    Valor=('VALOR_PAGO', 'sum'),
+                    Clientes=('MATRICULA', 'nunique')
+                ).reset_index()
+                tm_cidade['Ticket_Medio'] = tm_cidade['Valor'] / tm_cidade['Clientes']
+                tm_cidade = tm_cidade.sort_values('Ticket_Medio', ascending=False)
+                fig_tm_cid = px.bar(
+                    tm_cidade, x='CIDADE', y='Ticket_Medio',
+                    title='Ticket Médio por Cidade',
+                    labels={'CIDADE': 'Cidade', 'Ticket_Medio': 'Ticket Médio (R$)'},
+                    text_auto='.2f'
+                )
+                st.plotly_chart(fig_tm_cid, use_container_width=True)
+
+            # 4. Mapa de Calor: Dia do Pagamento x Canal
+            if 'TIPO_PAGAMENTO' in df_pagamentos_campanha.columns:
+                st.subheader("🔥 Concentração: Tempo de Pagamento x Canal")
+                heatmap_data = df_pagamentos_campanha.groupby(['TIPO_PAGAMENTO', 'DIAS_APOS_ENVIO'])['VALOR_PAGO'].sum().reset_index()
+                fig_heat = px.density_heatmap(
+                    heatmap_data, x='DIAS_APOS_ENVIO', y='TIPO_PAGAMENTO', z='VALOR_PAGO',
+                    title='Mapa de Calor: Em quais dias cada canal arrecada mais?',
+                    labels={'DIAS_APOS_ENVIO': 'Dias Após Envio', 'TIPO_PAGAMENTO': 'Canal', 'VALOR_PAGO': 'Valor (R$)'},
+                    color_continuous_scale='Viridis'
+                )
+                st.plotly_chart(fig_heat, use_container_width=True)
+
+            # 5. Utilização (Subcategoria)
+            if 'UTILIZACAO' in df_pagamentos_campanha.columns:
+                st.subheader("💧 Arrecadação por Tipo de Utilização")
+                util_resumo = df_pagamentos_campanha.groupby('UTILIZACAO')['VALOR_PAGO'].sum().reset_index().sort_values('VALOR_PAGO', ascending=False)
+                fig_util = px.pie(
+                    util_resumo, names='UTILIZACAO', values='VALOR_PAGO',
+                    title='Distribuição por Utilização (Subcategoria)',
+                    hole=0.4
+                )
+                st.plotly_chart(fig_util, use_container_width=True)
 
 elif executar_analise and not dados_prontos:
     if campanha_selecionada is None:
