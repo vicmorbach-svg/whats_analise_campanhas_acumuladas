@@ -219,7 +219,7 @@ def load_pagamentos_github():
     if not content: return None
 
     # Passando as colunas para ler APENAS o necessário
-    colunas_uteis = ["MATRICULA_PAGAMENTO", "DATA_PAGAMENTO", "VALOR_PAGO", "CIDADE", "TIPO_PAGAMENTO", "VENCIMENTO"]
+    colunas_uteis = ["MATRICULA_PAGAMENTO", "DATA_PAGAMENTO", "VALOR_PAGO", "CIDADE", "TIPO_PAGAMENTO", "VENCIMENTO", "UTILIZACAO", "TIPO_FATURA"]
     df = parquet_bytes_to_df(content, colunas=colunas_uteis)
 
     if df is not None:
@@ -353,7 +353,8 @@ def load_and_process_pagamentos(uploaded_file):
             'Arrecadador': 'TIPO_PAGAMENTO',
             'Vencimento': 'VENCIMENTO',
             'Tipo Fatura': 'TIPO_FATURA',
-            'Utilização (Sub. Categ.)': 'UTILIZACAO'
+            'Utilização (Sub. Categ.)': 'UTILIZACAO',
+            'UTILIZACAO': 'UTILIZACAO'
         }
         df.rename(columns=mapeamento_nomes, inplace=True)
 
@@ -590,6 +591,10 @@ if executar_analise and dados_prontos:
     del df_pagamentos
     load_pagamentos_github.clear()
     gc.collect() # Força a limpeza da RAM
+
+    # --- AJUSTE: Remove Cidade/Diretoria do cliente para usar a do Pagamento ---
+    colunas_remover_cliente = [c for c in ['CIDADE', 'DIRETORIA'] if c in df_merge.columns]
+    df_merge = df_merge.drop(columns=colunas_remover_cliente)
 
     # ── Cruzamento final (agora muito mais leve) ──────────────
     df_cruzado = pd.merge(
