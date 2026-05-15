@@ -901,7 +901,7 @@ if executar_analise and dados_prontos:
                 labels={'DIAS_APOS_ENVIO': 'Dias Após o Envio', 'VALOR_ACUMULADO': 'Valor Acumulado (R$)'},
                 markers=True
             )
-            st.plotly_chart(fig_acumulado, use_container_width=True)
+            st.plotly_chart(fig_acumulado, use_container_width=True, KEY="fig_acumulado_aba6")
 
             # 2. Canal de Pagamento por Cidade (Gráfico Empilhado)
             if 'CIDADE' in df_pagamentos_campanha.columns and 'TIPO_PAGAMENTO' in df_pagamentos_campanha.columns:
@@ -915,7 +915,7 @@ if executar_analise and dados_prontos:
                     barmode='stack',
                     category_orders={'CIDADE': ordem_cidades}
                 )
-                st.plotly_chart(fig_canal_cid, use_container_width=True)
+                st.plotly_chart(fig_canal_cid, use_container_width=True, key="fig_canal_cid_aba6")
 
             # 3. Ticket Médio por Cidade
             if 'CIDADE' in df_pagamentos_campanha.columns:
@@ -932,7 +932,7 @@ if executar_analise and dados_prontos:
                     labels={'CIDADE': 'Cidade', 'Ticket_Medio': 'Ticket Médio (R$)'},
                     text_auto='.2f'
                 )
-                st.plotly_chart(fig_tm_cid, use_container_width=True)
+                st.plotly_chart(fig_tm_cid, use_container_width=True, key="fig_tm_cid_aba6")
 
             # 4. Mapa de Calor: Dia do Pagamento x Canal
             if 'TIPO_PAGAMENTO' in df_pagamentos_campanha.columns:
@@ -944,7 +944,7 @@ if executar_analise and dados_prontos:
                     labels={'DIAS_APOS_ENVIO': 'Dias Após Envio', 'TIPO_PAGAMENTO': 'Canal', 'VALOR_PAGO': 'Valor (R$)'},
                     color_continuous_scale='Viridis'
                 )
-                st.plotly_chart(fig_heat, use_container_width=True)
+                st.plotly_chart(fig_heat, use_container_width=True, key="fig_heat_aba6")
 
             # 5. Utilização (Subcategoria)
             if 'UTILIZACAO' in df_pagamentos_campanha.columns:
@@ -955,7 +955,7 @@ if executar_analise and dados_prontos:
                     title='Distribuição por Utilização (Subcategoria)',
                     hole=0.4
                 )
-                st.plotly_chart(fig_util, use_container_width=True)
+                st.plotly_chart(fig_util, use_container_width=True, key="fig_util_aba6")
 
 elif executar_analise and not dados_prontos:
     if campanha_selecionada is None:
