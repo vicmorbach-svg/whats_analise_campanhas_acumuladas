@@ -647,7 +647,7 @@ if executar_analise and dados_prontos:
         "🏙️ Cidade e Diretoria",
         "📅 Análise das Faturas",
         "💳 Canal de Pagamento",
-        "📋 Detalhes"
+        "📋 Detalhes",
         "🧪 Novas Visualizações"
     ])
 
