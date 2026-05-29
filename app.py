@@ -10,6 +10,8 @@ import uuid
 import gc
 import datetime
 import pytz
+import psycopg2 # Importar o psycopg2
+from sqlalchemy import create_engine # Importar create_engine do SQLAlchemy
 
 # Configura o fuso horário do Brasil
 fuso_br = pytz.timezone('America/Sao_Paulo')
@@ -21,7 +23,6 @@ if hora_atual < 8 or hora_atual >= 18:
     st.title("🌙 Sistema em Repouso")
     st.info("O painel de análise funciona apenas das 08h às 18h para economia de recursos.")
     st.stop() # Interrompe a execução de todo o resto do código abaixo
-
 
 # ══════════════════════════════════════════════════════════════
 # SISTEMA DE LOGIN
@@ -66,109 +67,98 @@ def is_admin():
     return st.session_state.get("role") == "admin"
 
 # ══════════════════════════════════════════════════════════════
-# GITHUB — Integração
+# POSTGRES — Integração
 # ══════════════════════════════════════════════════════════════
 
-def get_github_config():
+# Função para obter a string de conexão com o PostgreSQL
+def get_postgres_connection_string():
     try:
-        token  = st.secrets["github"]["token"]
-        repo   = st.secrets["github"]["repo"]
-        branch = st.secrets["github"].get("branch", "main")
-        return token, repo, branch
-    except Exception:
-        return None, None, None
-
-def get_github_headers():
-    token, _, _ = get_github_config()
-    return {"Authorization": f"token {token}", "Accept": "application/vnd.github.v3+json"}
-
-def get_file_sha(path):
-    token, repo, branch = get_github_config()
-    if not token: return None
-    url = f"https://api.github.com/repos/{repo}/contents/{path}?ref={branch}"
-    r   = requests.get(url, headers=get_github_headers())
-    if r.status_code == 200:
-        data = r.json()
-        if isinstance(data, dict): return data.get("sha")
-    return None
-
-def get_file_from_github(path):
-    token, repo, branch = get_github_config()
-    if not token: return None, None
-    raw_url = f"https://raw.githubusercontent.com/{repo}/{branch}/{path}"
-    r = requests.get(raw_url, headers={"Authorization": f"token {token}"})
-    if r.status_code == 200 and len(r.content) > 0:
-        return r.content, get_file_sha(path)
-    return None, None
-
-def save_file_to_github(path, content_bytes, message):
-    token, repo, branch = get_github_config()
-    if not token: return False
-    sha = get_file_sha(path)
-    url = f"https://api.github.com/repos/{repo}/contents/{path}"
-    payload = {
-        "message": message,
-        "content": base64.b64encode(content_bytes).decode("utf-8"),
-        "branch":  branch
-    }
-    if sha: payload["sha"] = sha
-    r = requests.put(url, headers=get_github_headers(), data=json.dumps(payload))
-    return r.status_code in [200, 201]
-
-def delete_file_from_github(path, message):
-    token, repo, branch = get_github_config()
-    if not token: return False
-    sha = get_file_sha(path)
-    if not sha: return True
-    url = f"https://api.github.com/repos/{repo}/contents/{path}"
-    payload = {"message": message, "sha": sha, "branch": branch}
-    r = requests.delete(url, headers=get_github_headers(), data=json.dumps(payload))
-    return r.status_code == 200
-
-def df_to_parquet_bytes(df):
-    buf = io.BytesIO()
-    df.to_parquet(buf, index=False, engine='pyarrow')
-    buf.seek(0)
-    return buf.getvalue()
-
-def parquet_bytes_to_df(content_bytes, colunas=None):
-    if not content_bytes: return None
-    try:
-        buf = io.BytesIO(content_bytes)
-        buf.seek(0)
-        return pd.read_parquet(buf, engine='pyarrow', columns=colunas)
-    except:
+        pg_secrets = st.secrets["postgres"]
+        return (
+            f"postgresql+psycopg2://{pg_secrets['user']}:{pg_secrets['password']}@"
+            f"{pg_secrets['host']}:{pg_secrets['port']}/{pg_secrets['database']}"
+        )
+    except Exception as e:
+        st.error(f"Erro ao carregar configurações do PostgreSQL: {e}")
         return None
 
+# Função para criar um engine SQLAlchemy (cacheado para não recriar a cada chamada)
+@st.cache_resource
+def get_sql_engine():
+    conn_string = get_postgres_connection_string()
+    if conn_string:
+        return create_engine(conn_string)
+    return None
+
+# Função para ler dados do PostgreSQL
+def read_from_postgres(table_name, columns=None, where_clause=None):
+    engine = get_sql_engine()
+    if engine is None:
+        return pd.DataFrame() # Retorna DataFrame vazio se não houver conexão
+
+    try:
+        cols_str = ", ".join(columns) if columns else "*"
+        query = f"SELECT {cols_str} FROM {table_name}"
+        if where_clause:
+            query += f" WHERE {where_clause}"
+
+        df = pd.read_sql_query(query, engine)
+        return df
+    except Exception as e:
+        st.error(f"Erro ao ler da tabela {table_name}: {e}")
+        return pd.DataFrame()
+
+# Função para escrever dados no PostgreSQL
+def write_to_postgres(df, table_name, if_exists='append', index=False):
+    engine = get_sql_engine()
+    if engine is None:
+        return False
+
+    try:
+        df.to_sql(table_name, engine, if_exists=if_exists, index=index)
+        return True
+    except Exception as e:
+        st.error(f"Erro ao escrever na tabela {table_name}: {e}")
+        return False
+
 # ══════════════════════════════════════════════════════════════
-# CAMPANHAS E PAGAMENTOS
+# CAMPANHAS E PAGAMENTOS (AGORA COM POSTGRES)
 # ══════════════════════════════════════════════════════════════
 
-META_PATH = "data/campanhas_meta.parquet"
-PAG_PATH  = "data/pagamentos.parquet"
-
+# Definimos os nomes das tabelas no PostgreSQL
+TABLE_META_CAMPANHAS = "campanhas_meta"
+TABLE_ENVIOS_PREFIX  = "campanha_envios_" # Sufixo será o ID da campanha
+TABLE_CLIENTES_PREFIX = "campanha_clientes_" # Sufixo será o ID da campanha
+TABLE_PAGAMENTOS     = "pagamentos"
 
 def load_campanhas_meta():
-    content, _ = get_file_from_github(META_PATH)
-    if content:
-        df = parquet_bytes_to_df(content)
-        if df is not None: return df
-    return pd.DataFrame(columns=['id', 'nome', 'criado_em', 'total_envios', 'total_clientes'])
+    df = read_from_postgres(TABLE_META_CAMPANHAS)
+    if df.empty:
+        return pd.DataFrame(columns=['id', 'nome', 'criado_em', 'total_envios', 'total_clientes'])
+    return df
 
 def save_campanha(nome, df_envios, df_clientes):
     campanha_id = str(uuid.uuid4())[:8]
-    ok_envios = save_file_to_github(f"data/campanhas/{campanha_id}_envios.parquet", df_to_parquet_bytes(df_envios), f"Campanha {nome}: envios")
-    ok_clientes = save_file_to_github(f"data/campanhas/{campanha_id}_clientes.parquet", df_to_parquet_bytes(df_clientes), f"Campanha {nome}: clientes")
 
-    if not ok_envios or not ok_clientes: return None, "Erro ao salvar arquivos da campanha."
+    # Salva envios e clientes em tabelas separadas para cada campanha
+    ok_envios = write_to_postgres(df_envios, f"{TABLE_ENVIOS_PREFIX}{campanha_id}", if_exists='replace')
+    ok_clientes = write_to_postgres(df_clientes, f"{TABLE_CLIENTES_PREFIX}{campanha_id}", if_exists='replace')
+
+    if not ok_envios or not ok_clientes: 
+        st.error("Erro ao salvar arquivos da campanha no banco de dados.")
+        return None, "Erro ao salvar arquivos da campanha."
 
     df_meta = load_campanhas_meta()
     nova = pd.DataFrame([{
         'id': campanha_id, 'nome': nome, 'criado_em': pd.Timestamp.now(),
         'total_envios': df_envios['TELEFONE_ENVIO'].nunique(), 'total_clientes': len(df_clientes)
     }])
+
+    # Adiciona a nova meta e salva de volta
     df_meta = pd.concat([df_meta, nova], ignore_index=True)
-    save_file_to_github(META_PATH, df_to_parquet_bytes(df_meta), f"Meta: campanha {nome} criada")
+    if not write_to_postgres(df_meta, TABLE_META_CAMPANHAS, if_exists='replace'):
+        return None, "Erro ao atualizar metadados da campanha."
+
     return campanha_id, None
 
 def update_campanha(campanha_id, nome, df_envios_novos=None, df_clientes_novos=None):
@@ -180,49 +170,63 @@ def update_campanha(campanha_id, nome, df_envios_novos=None, df_clientes_novos=N
         df_envios_existente = load_campanha_envios(campanha_id)
         df_envios_combined = pd.concat([df_envios_existente, df_envios_novos], ignore_index=True) if df_envios_existente is not None else df_envios_novos
         df_envios_combined = df_envios_combined.drop_duplicates(subset=['TELEFONE_ENVIO', 'DATA_ENVIO'], keep='last')
-        save_file_to_github(f"data/campanhas/{campanha_id}_envios.parquet", df_to_parquet_bytes(df_envios_combined), f"Campanha {nome}: atualização envios")
+        if not write_to_postgres(df_envios_combined, f"{TABLE_ENVIOS_PREFIX}{campanha_id}", if_exists='replace'):
+            return False, "Erro ao atualizar envios da campanha."
         df_meta.at[idx[0], 'total_envios'] = df_envios_combined['TELEFONE_ENVIO'].nunique()
 
     if df_clientes_novos is not None:
         df_clientes_existente = load_campanha_clientes(campanha_id)
         df_clientes_combined = pd.concat([df_clientes_existente, df_clientes_novos], ignore_index=True) if df_clientes_existente is not None else df_clientes_novos
         df_clientes_combined = df_clientes_combined.drop_duplicates(subset=['TELEFONE_CLIENTE', 'MATRICULA_CLIENTE'], keep='last')
-        save_file_to_github(f"data/campanhas/{campanha_id}_clientes.parquet", df_to_parquet_bytes(df_clientes_combined), f"Campanha {nome}: atualização clientes")
+        if not write_to_postgres(df_clientes_combined, f"{TABLE_CLIENTES_PREFIX}{campanha_id}", if_exists='replace'):
+            return False, "Erro ao atualizar clientes da campanha."
         df_meta.at[idx[0], 'total_clientes'] = len(df_clientes_combined)
 
-    save_file_to_github(META_PATH, df_to_parquet_bytes(df_meta), f"Meta: campanha {nome} atualizada")
+    if not write_to_postgres(df_meta, TABLE_META_CAMPANHAS, if_exists='replace'):
+        return False, "Erro ao atualizar metadados da campanha."
+
+    # Limpar caches específicos da campanha
     load_campanha_envios.clear()
     load_campanha_clientes.clear()
     return True, None
 
 @st.cache_data(ttl=3600, max_entries=2)
 def load_campanha_envios(campanha_id):
-    content, _ = get_file_from_github(f"data/campanhas/{campanha_id}_envios.parquet")
-    return parquet_bytes_to_df(content) if content else None
+    return read_from_postgres(f"{TABLE_ENVIOS_PREFIX}{campanha_id}")
 
 @st.cache_data(ttl=3600, max_entries=2)
 def load_campanha_clientes(campanha_id):
-    content, _ = get_file_from_github(f"data/campanhas/{campanha_id}_clientes.parquet")
+    # As colunas são filtradas após a leitura, se necessário, ou a query pode ser mais específica
+    df = read_from_postgres(f"{TABLE_CLIENTES_PREFIX}{campanha_id}")
     colunas_cli = ['TELEFONE_CLIENTE', 'MATRICULA_CLIENTE', 'SITUACAO', 'CIDADE', 'DIRETORIA']
-    return parquet_bytes_to_df(content, colunas=colunas_cli) if content else None
+    return df[[col for col in colunas_cli if col in df.columns]] if not df.empty else df
 
 def delete_campanha(campanha_id, nome):
-    df_meta = load_campanhas_meta()
-    df_meta = df_meta[df_meta['id'] != campanha_id]
-    save_file_to_github(META_PATH, df_to_parquet_bytes(df_meta), f"Meta: campanha {nome} removida")
-    delete_file_from_github(f"data/campanhas/{campanha_id}_envios.parquet", f"Removendo envios {nome}")
-    delete_file_from_github(f"data/campanhas/{campanha_id}_clientes.parquet", f"Removendo clientes {nome}")
+    engine = get_sql_engine()
+    if engine is None: return False
+
+    try:
+        with engine.connect() as connection:
+            # Exclui as tabelas de envios e clientes da campanha
+            connection.execute(f"DROP TABLE IF EXISTS {TABLE_ENVIOS_PREFIX}{campanha_id}")
+            connection.execute(f"DROP TABLE IF EXISTS {TABLE_CLIENTES_PREFIX}{campanha_id}")
+
+            # Remove a entrada da meta tabela
+            df_meta = load_campanhas_meta()
+            df_meta = df_meta[df_meta['id'] != campanha_id]
+            write_to_postgres(df_meta, TABLE_META_CAMPANHAS, if_exists='replace')
+        return True
+    except Exception as e:
+        st.error(f"Erro ao deletar campanha {nome}: {e}")
+        return False
 
 @st.cache_data(ttl=900, max_entries=1)
-def load_pagamentos_github():
-    content, _ = get_file_from_github(PAG_PATH)
-    if not content: return None
-
+def load_pagamentos_github(): # Renomeada para load_pagamentos_db para refletir a mudança
     # Passando as colunas para ler APENAS o necessário
     colunas_uteis = ["MATRICULA_PAGAMENTO", "DATA_PAGAMENTO", "VALOR_PAGO", "CIDADE", "TIPO_PAGAMENTO", "VENCIMENTO", "UTILIZACAO", "TIPO_FATURA"]
-    df = parquet_bytes_to_df(content, colunas=colunas_uteis)
+    df = read_from_postgres(TABLE_PAGAMENTOS, columns=colunas_uteis)
 
-    if df is not None:
+    if df is not None and not df.empty:
         # Downcasting imediato (converte textos repetidos em categorias leves)
         colunas_categoricas = ['CIDADE', 'TIPO_PAGAMENTO']
         for col in colunas_categoricas:
@@ -231,12 +235,12 @@ def load_pagamentos_github():
 
         # Reduz o peso da coluna de valor
         if 'VALOR_PAGO' in df.columns:
-            df['VALOR_PAGO'] = pd.to_numeric(df['VALOR_PAGO'], downcast='float')
+            df['VALOR_PAGO'] = pd.to_numeric(df['VALOR_PAGO'], downcast='float', errors='coerce')
 
     return df
 
-def update_pagamentos_github(df_novo):
-    df_existente = load_pagamentos_github()
+def update_pagamentos_github(df_novo): # Renomeada para update_pagamentos_db
+    df_existente = load_pagamentos_github() # Carrega do DB
     if df_existente is not None and not df_existente.empty:
         df_combined = pd.concat([df_existente, df_novo], ignore_index=True)
         df_combined = df_combined.drop_duplicates(subset=['MATRICULA_PAGAMENTO', 'DATA_PAGAMENTO', 'VALOR_PAGO'], keep='last')
@@ -245,12 +249,14 @@ def update_pagamentos_github(df_novo):
 
     total_antes = len(df_existente) if df_existente is not None else 0
     novos = len(df_combined) - total_antes
-    ok = save_file_to_github(PAG_PATH, df_to_parquet_bytes(df_combined), "Pagamentos: atualização")
-    load_pagamentos_github.clear() 
+
+    # Escreve a base combinada de volta no PostgreSQL, substituindo a existente
+    ok = write_to_postgres(df_combined, TABLE_PAGAMENTOS, if_exists='replace')
+    load_pagamentos_github.clear() # Limpa o cache após a atualização
     return ok, len(df_combined), novos
 
 # ══════════════════════════════════════════════════════════════
-# PROCESSAMENTO DE ARQUIVOS
+# PROCESSAMENTO DE ARQUIVOS (MANTIDO, pois o upload ainda é de arquivos)
 # ══════════════════════════════════════════════════════════════
 
 @st.cache_data
@@ -279,7 +285,7 @@ def load_and_process_envios(uploaded_file):
         # Fallback: se for um arquivo antigo sem a coluna Reason, assume que todos foram entregues
         if 'STATUS_ENVIO' not in df_envios.columns:
             df_envios['STATUS_ENVIO'] = 'DELIVERED_TO_HANDSET'
-            
+
         df_envios['TELEFONE_ENVIO'] = df_envios['TELEFONE_ENVIO'].astype(str).str.replace(r'^55|\.0$', '', regex=True).str.strip()
         df_envios['DATA_ENVIO'] = pd.to_datetime(df_envios['DATA_ENVIO'], errors='coerce', dayfirst=True)
         df_envios.dropna(subset=['DATA_ENVIO'], inplace=True)
@@ -297,7 +303,7 @@ def load_and_process_clientes(uploaded_file):
             df = pd.read_parquet(io.BytesIO(file_bytes), engine='pyarrow')
         else:
             df = pd.read_excel(uploaded_file)
-            
+
         colunas_ler = ['TELEFONE', 'MATRICULA', 'SITUACAO']
         for col in ['CIDADE', 'DIRETORIA']:
             if col in df.columns: colunas_ler.append(col)
@@ -427,13 +433,13 @@ def load_and_process_pagamentos(uploaded_file):
 
         if 'UTILIZACAO' in df_pag.columns:
             df_pag['UTILIZACAO'] = df_pag['UTILIZACAO'].astype(str).str.strip().replace('nan', 'Não informado')
-            
+
         # Otimização de Memória (Downcasting)
         colunas_categoricas = ['CIDADE', 'TIPO_PAGAMENTO', 'TIPO_FATURA', 'UTILIZACAO']
         for col in colunas_categoricas:
             if col in df_pag.columns:
                 df_pag[col] = df_pag[col].astype('category')
-                
+
         return df_pag
 
     except Exception as e:
@@ -470,7 +476,7 @@ st.sidebar.markdown("---")
 
 # --- NOVO: Indicador fixo de pagamentos na base ---
 st.sidebar.header("🏦 Resumo da Base")
-df_pag_geral = load_pagamentos_github()
+df_pag_geral = load_pagamentos_github() # Agora carrega do DB
 total_pag_geral = len(df_pag_geral) if df_pag_geral is not None else 0
 st.sidebar.metric("Total de Pagamentos Cadastrados", f"{total_pag_geral:,}".replace(",", "."))
 st.sidebar.markdown("---")
@@ -485,7 +491,10 @@ campanha_selecionada = None
 if campanha_selecionada_nome != "(nenhuma)":
     campanha_selecionada = df_meta[df_meta['nome'] == campanha_selecionada_nome].iloc[0]
     if is_admin() and st.sidebar.button("🗑️ Excluir esta campanha"):
-        delete_campanha(campanha_selecionada['id'], campanha_selecionada_nome)
+        if delete_campanha(campanha_selecionada['id'], campanha_selecionada_nome):
+            st.session_state["msg_sucesso"] = "Campanha excluída com sucesso!"
+        else:
+            st.error("Erro ao excluir campanha.")
         st.rerun()
 
 janela_dias = st.sidebar.slider("Janela de dias após o envio:", 0, 30, 10)
@@ -498,8 +507,11 @@ if is_admin():
         up_env = st.file_uploader("Envios (.xlsx, .parquet)", type=["xlsx", "parquet"], key="n_env")
         up_cli = st.file_uploader("Clientes (.xlsx, .parquet)", type=["xlsx", "parquet"], key="n_cli")
         if st.button("Salvar campanha") and nome_nova and up_env and up_cli:
-            save_campanha(nome_nova, load_and_process_envios(up_env), load_and_process_clientes(up_cli))
-            st.success("Campanha salva!")
+            camp_id, erro = save_campanha(nome_nova, load_and_process_envios(up_env), load_and_process_clientes(up_cli))
+            if camp_id:
+                st.session_state["msg_sucesso"] = "Campanha salva!"
+            else:
+                st.error(erro)
             st.rerun()
 
     with st.sidebar.expander("🔄 Atualizar Campanha"):
@@ -509,15 +521,19 @@ if is_admin():
             up_cli_u = st.file_uploader("Novos Clientes", type=["xlsx", "parquet"], key="u_cli")
             if st.button("Atualizar") and (up_env_u or up_cli_u):
                 cid = df_meta[df_meta['nome'] == camp_upd].iloc[0]['id']
-                update_campanha(cid, camp_upd, load_and_process_envios(up_env_u) if up_env_u else None, load_and_process_clientes(up_cli_u) if up_cli_u else None)
-                st.success("Campanha atualizada!")
+                ok, erro = update_campanha(cid, camp_upd, load_and_process_envios(up_env_u) if up_env_u else None, load_and_process_clientes(up_cli_u) if up_cli_u else None)
+                if ok:
+                    st.session_state["msg_sucesso"] = "Campanha atualizada!"
+                else:
+                    st.error(erro)
                 st.rerun()
 
     with st.sidebar.expander("💰 Base de Pagamentos"):
         up_pag = st.file_uploader("Pagamentos", type=["csv", "xlsx", "parquet"])
         if st.button("Enviar Pagamentos") and up_pag:
-            ok, total, novos = update_pagamentos_github(load_and_process_pagamentos(up_pag))
+            ok, total, novos = update_pagamentos_github(load_and_process_pagamentos(up_pag)) # Agora atualiza no DB
             if ok: st.success(f"Pagamentos atualizados! Total: {total} | Novos: {novos}")
+            else: st.error("Erro ao atualizar pagamentos.")
 
 # ══════════════════════════════════════════════════════════════
 # CARREGAMENTO DOS DADOS
@@ -532,14 +548,17 @@ if campanha_selecionada is not None:
     with st.spinner("Carregando dados da campanha..."):
         df_envios   = load_campanha_envios(campanha_selecionada['id'])
         df_clientes = load_campanha_clientes(campanha_selecionada['id'])
-        df_pagamentos = load_pagamentos_github()
+        df_pagamentos = load_pagamentos_github() # Agora carrega do DB
 
     # Verifica se todos os 3 arquivos foram carregados com sucesso
     dados_prontos = (
-        df_envios is not None and
-        df_clientes is not None and
-        df_pagamentos is not None
+        df_envios is not None and not df_envios.empty and
+        df_clientes is not None and not df_clientes.empty and
+        df_pagamentos is not None and not df_pagamentos.empty
     )
+    if not dados_prontos:
+        st.warning("Alguns dados da campanha não puderam ser carregados. Verifique se as tabelas existem ou se há dados nelas.")
+
 
 # ══════════════════════════════════════════════════════════════
 # ANÁLISE (VERSÃO OTIMIZADA PARA MEMÓRIA)
@@ -554,8 +573,6 @@ if executar_analise and dados_prontos:
     total_envios_rejeitados    = df_envios[df_envios['STATUS_ENVIO'] != 'DELIVERED_TO_HANDSET']['TELEFONE_ENVIO'].count()
     taxa_eficiencia_disparos   = (total_clientes_notificados / total_clientes_unicos_base_envios * 100) if total_clientes_unicos_base_envios > 0 else 0
 
-    
-
     df_merge = pd.merge(
         df_envios,
         df_clientes,
@@ -567,8 +584,6 @@ if executar_analise and dados_prontos:
     if df_merge.empty:
         st.error("Nenhum cliente encontrado após cruzamento entre envios e clientes.")
         st.stop()
-
-    
 
     # Garante tipo string nos campos de matrícula para o merge
     df_merge['MATRICULA_CLIENTE'] = df_merge['MATRICULA_CLIENTE'].astype(str).str.strip()
@@ -585,11 +600,13 @@ if executar_analise and dados_prontos:
     matriculas_alvo = df_merge['MATRICULA_CLIENTE'].unique()
 
     # Filtra a base gigante de pagamentos ANTES de fazer o merge
+    # Aqui, a otimização é que df_pagamentos já vem filtrado do DB se possível,
+    # mas o Pandas ainda faz a filtragem final em memória.
     df_pagamentos_filtrado = df_pagamentos[df_pagamentos['MATRICULA_PAGAMENTO'].isin(matriculas_alvo)].copy()
 
     # Libera a memória da base gigante original (opcional, mas recomendado)
     del df_pagamentos
-    load_pagamentos_github.clear()
+    load_pagamentos_github.clear() # Limpa o cache da função de carregamento de pagamentos
     gc.collect() # Força a limpeza da RAM
 
     # --- AJUSTE: Remove Cidade/Diretoria do cliente para usar a do Pagamento ---
@@ -633,7 +650,6 @@ if executar_analise and dados_prontos:
     )
 
     df_pagamentos_campanha.rename(columns={'MATRICULA_CLIENTE': 'MATRICULA'}, inplace=True)
-
 
     # ── Métricas ──────────────────────────────────────────────
     clientes_unicos_que_pagaram_matriculas = df_pagamentos_campanha['MATRICULA'].nunique()
@@ -687,7 +703,7 @@ if executar_analise and dados_prontos:
         col12.metric("Taxa eficiênica dívida total", f"{taxa_eficiencia_valor_base:,.2f}%".replace(",", "X").replace(".", ",").replace("X", "."), border=True)
         col13.metric("Taxa eficiênica dívida notificada", f"{taxa_eficiencia_valor_notificados:,.2f}%".replace(",", "X").replace(".", ",").replace("X", "."), border=True)
 
-        col14, col15, col16, col17 = st.columns(4)  
+        col14, col15, col16, col17 = st.columns(4)
         col14.metric("Ticket médio",   fmt_brl(ticket_medio))
         col15.metric("Total de disparos", f"{total_base_envio:,}")
         col16.metric("Custo da campanha", fmt_brl(custo_campanha))
@@ -847,8 +863,8 @@ if executar_analise and dados_prontos:
                     barmode='stack',
                     category_orders={'CIDADE': ordem_cidades}
                 )
-                st.plotly_chart(fig_canal_cid, use_container_width=True)            
-        
+                st.plotly_chart(fig_canal_cid, use_container_width=True)
+
         else:
             st.info("Coluna 'TIPO_PAGAMENTO' não encontrada no arquivo de pagamentos.")
 
@@ -881,7 +897,6 @@ if executar_analise and dados_prontos:
             )
         else:
             st.info("Nenhum pagamento encontrado dentro da janela definida para a campanha.")
-
 
     # ══════════════════════════════════════════════════════════
     # ABA 6 — NOVAS VISUALIZAÇÕES (LABORATÓRIO)
@@ -960,12 +975,12 @@ if executar_analise and dados_prontos:
 elif executar_analise and not dados_prontos:
     if campanha_selecionada is None:
         st.warning("Selecione uma campanha antes de executar a análise.")
-    elif df_pagamentos is None:
-        st.warning("Base de pagamentos não disponível. Um administrador precisa fazer o upload.")
-    elif df_envios is None:
-        st.warning("Não foi possível carregar os envios da campanha selecionada.")
-    elif df_clientes is None:
-        st.warning("Não foi possível carregar os clientes da campanha selecionada.")
+    elif df_pagamentos is None or df_pagamentos.empty:
+        st.warning("Base de pagamentos não disponível ou vazia. Um administrador precisa fazer o upload.")
+    elif df_envios is None or df_envios.empty:
+        st.warning("Não foi possível carregar os envios da campanha selecionada ou a tabela está vazia.")
+    elif df_clientes is None or df_clientes.empty:
+        st.warning("Não foi possível carregar os clientes da campanha selecionada ou a tabela está vazia.")
 
 elif not executar_analise:
     if campanha_selecionada is None:
