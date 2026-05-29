@@ -12,7 +12,7 @@ import datetime
 import pytz
 import psycopg2 # Importar o psycopg2
 from sqlalchemy import create_engine # Importar create_engine do SQLAlchemy
-
+#atualiza
 # Configura o fuso horário do Brasil
 fuso_br = pytz.timezone('America/Sao_Paulo')
 hora_atual = datetime.datetime.now(fuso_br).hour
