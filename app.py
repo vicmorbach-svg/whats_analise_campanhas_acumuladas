@@ -275,15 +275,36 @@ def update_pagamentos_db(df_novo): # Renomeada para update_pagamentos_db
     df_existente = load_pagamentos_db() # Carrega do DB
     if df_existente is not None and not df_existente.empty:
         df_combined = pd.concat([df_existente, df_novo], ignore_index=True)
-        df_combined = df_combined.drop_duplicates(subset=['matricula_pagamento', 'data_pagamento', 'valor_pago'], keep='last')
+        # Remove duplicatas com base em um conjunto de colunas chave
+        df_combined = df_combined.drop_duplicates(subset=['matricula_pagamento', 'data_pagamento', 'valor_pago'], keep='first')
     else:
         df_combined = df_novo.copy()
 
     total_antes = len(df_existente) if df_existente is not None else 0
     novos = len(df_combined) - total_antes
 
-    # Escreve a base combinada de volta no PostgreSQL, substituindo a existente
-    ok = write_to_postgres(df_combined, TABLE_PAGAMENTOS, if_exists='replace')
+    # Para atualizar a tabela de pagamentos, precisamos primeiro apagar a tabela existente
+    # e depois reescrever o DataFrame combinado. Isso garante que as duplicatas sejam removidas
+    # e que o esquema da tabela seja consistente.
+    # Alternativamente, poderíamos usar um upsert, mas 'replace' é mais simples para este caso.
+    # O erro original "column already present" sugere que o 'replace' não estava funcionando como esperado
+    # em algum cenário, possivelmente por conta de um schema já existente e não compatível com a recriação.
+    # A solução mais robusta para evitar o erro de "column already present" ao tentar "replace"
+    # é garantir que a tabela seja explicitamente dropada antes de ser recriada,
+    # ou usar 'append' e gerenciar as duplicatas no Python, como estamos fazendo.
+    # Se o problema for na criação inicial da tabela, 'replace' deveria funcionar.
+    # Se o problema for ao tentar adicionar mais dados, 'append' é o correto.
+    # O erro "column already present" com 'replace' é incomum, a menos que o SQLAlchemy
+    # esteja tentando ALTERAR a coluna em vez de dropar e recriar a tabela.
+
+    # Vamos tentar uma abordagem mais explícita: dropar a tabela e recriar com os dados combinados.
+    # Isso garante que o esquema seja sempre o do DataFrame atualizado.
+    execute_sql_command(f'DROP TABLE IF EXISTS "{TABLE_PAGAMENTOS.lower()}"')
+
+    # Escreve a base combinada de volta no PostgreSQL, agora com if_exists='append'
+    # para a primeira escrita (que será a criação da tabela) e depois para futuras adições.
+    # Como acabamos de dropar, a tabela será criada do zero.
+    ok = write_to_postgres(df_combined, TABLE_PAGAMENTOS, if_exists='append')
     load_pagamentos_db.clear() # Limpa o cache após a atualização
     return ok, len(df_combined), novos
 
@@ -561,11 +582,21 @@ if is_admin():
                 st.rerun()
 
     with st.sidebar.expander("💰 Base de Pagamentos"):
-        up_pag = st.file_uploader("Pagamentos", type=["csv", "xlsx", "parquet"])
-        if st.button("Enviar Pagamentos") and up_pag:
-            ok, total, novos = update_pagamentos_db(load_and_process_pagamentos(up_pag)) # Agora atualiza no DB
-            if ok: st.success(f"Pagamentos atualizados! Total: {total} | Novos: {novos}")
-            else: st.error("Erro ao atualizar pagamentos.")
+        # Permite múltiplos arquivos de pagamentos
+        uploaded_payment_files = st.file_uploader("Pagamentos (múltiplos arquivos)", type=["csv", "xlsx", "parquet"], accept_multiple_files=True)
+        if st.button("Enviar Pagamentos") and uploaded_payment_files:
+            all_new_payments_df = pd.DataFrame()
+            for up_pag in uploaded_payment_files:
+                df_temp = load_and_process_pagamentos(up_pag)
+                if df_temp is not None and not df_temp.empty:
+                    all_new_payments_df = pd.concat([all_new_payments_df, df_temp], ignore_index=True)
+
+            if not all_new_payments_df.empty:
+                ok, total, novos = update_pagamentos_db(all_new_payments_df) # Agora atualiza no DB
+                if ok: st.success(f"Pagamentos atualizados! Total: {total} | Novos: {novos}")
+                else: st.error("Erro ao atualizar pagamentos.")
+            else:
+                st.warning("Nenhum dado válido encontrado nos arquivos de pagamentos enviados.")
 
 # ══════════════════════════════════════════════════════════════
 # CARREGAMENTO DOS DADOS
@@ -600,8 +631,8 @@ if executar_analise and dados_prontos:
     # ── Cruzamento envios x clientes ──────────────────────────
     total_clientes_unicos_base_envios = df_envios['telefone_envio'].nunique()
     total_base_envio = df_envios['telefone_envio'].count()
-    total_clientes_notificados = df_envios[df_envios['status_envio'] == 'DELIVERED_TO_HANDSET']['telefone_envio'].nunique()
-    total_envios_rejeitados    = df_envios[df_envios['status_envio'] != 'DELIVERED_TO_HANDSET']['telefone_envio'].count()
+    total_clientes_notificados = df_envios[df_envios['status_envio'] == 'delivered_to_handset']['telefone_envio'].nunique()
+    total_envios_rejeitados    = df_envios[df_envios['status_envio'] != 'delivered_to_handset']['telefone_envio'].count()
     taxa_eficiencia_disparos   = (total_clientes_notificados / total_clientes_unicos_base_envios * 100) if total_clientes_unicos_base_envios > 0 else 0
 
     df_merge = pd.merge(
@@ -623,7 +654,7 @@ if executar_analise and dados_prontos:
     # ── Cálculos de Dívida (Removendo duplicatas por cliente) ──
     total_divida_base_envios = df_merge.drop_duplicates(subset=['matricula_cliente'])['situacao'].sum()
 
-    df_entregues = df_merge[df_merge['status_envio'] == 'DELIVERED_TO_HANDSET']
+    df_entregues = df_merge[df_merge['status_envio'] == 'delivered_to_handset']
     total_divida_notificados = df_entregues.drop_duplicates(subset=['matricula_cliente'])['situacao'].sum()
 
     # ── OTIMIZAÇÃO DE MEMÓRIA: Pré-filtragem ──────────────────
