@@ -11,6 +11,7 @@ import datetime
 import pytz
 import psycopg2 # Importar o psycopg2
 from sqlalchemy import create_engine, text # Importar create_engine e text do SQLAlchemy
+from sqlalchemy.exc import ProgrammingError # Importar ProgrammingError do SQLAlchemy
 
 # Configura o fuso horário do Brasil
 fuso_br = pytz.timezone('America/Sao_Paulo')
@@ -104,8 +105,16 @@ def read_from_postgres(table_name, columns=None):
             query = f'SELECT * FROM "{table_name.lower()}"' # Garante minúsculas e aspas duplas
         df = pd.read_sql(query, engine)
         return df
+    except ProgrammingError as e:
+        # Captura o erro específico de tabela não existente
+        if "relation" in str(e) and "does not exist" in str(e):
+            # st.warning(f"Tabela '{table_name}' não encontrada. Retornando DataFrame vazio.")
+            return pd.DataFrame()
+        else:
+            st.error(f"Erro ao ler da tabela {table_name}: {e}")
+            return pd.DataFrame()
     except Exception as e:
-        st.error(f"Erro ao ler da tabela {table_name}: {e}")
+        st.error(f"Erro inesperado ao ler da tabela {table_name}: {e}")
         return pd.DataFrame()
 
 # Função para escrever dados no PostgreSQL
@@ -273,11 +282,9 @@ def load_pagamentos_db(): # Renomeada para refletir o uso do DB
 
 def update_pagamentos_db(df_novo): # Renomeada para update_pagamentos_db
     df_existente = load_pagamentos_db() # Carrega do DB
-
     if df_existente is not None and not df_existente.empty:
         df_combined = pd.concat([df_existente, df_novo], ignore_index=True)
-        # Remove duplicatas com base em um conjunto de colunas chave
-        df_combined = df_combined.drop_duplicates(subset=['matricula_pagamento', 'data_pagamento', 'valor_pago'], keep='first')
+        df_combined = df_combined.drop_duplicates(subset=['matricula_pagamento', 'data_pagamento', 'valor_pago'], keep='last')
     else:
         df_combined = df_novo.copy()
 
@@ -571,21 +578,11 @@ if is_admin():
                 st.rerun()
 
     with st.sidebar.expander("💰 Base de Pagamentos"):
-        # Permite múltiplos arquivos de pagamentos
-        uploaded_payment_files = st.file_uploader("Pagamentos (múltiplos arquivos)", type=["csv", "xlsx", "parquet"], accept_multiple_files=True)
-        if st.button("Enviar Pagamentos") and uploaded_payment_files:
-            all_new_payments_df = pd.DataFrame()
-            for up_pag in uploaded_payment_files:
-                df_temp = load_and_process_pagamentos(up_pag)
-                if df_temp is not None and not df_temp.empty:
-                    all_new_payments_df = pd.concat([all_new_payments_df, df_temp], ignore_index=True)
-
-            if not all_new_payments_df.empty:
-                ok, total, novos = update_pagamentos_db(all_new_payments_df) # Agora atualiza no DB
-                if ok: st.success(f"Pagamentos atualizados! Total: {total} | Novos: {novos}")
-                else: st.error("Erro ao atualizar pagamentos.")
-            else:
-                st.warning("Nenhum dado válido encontrado nos arquivos de pagamentos enviados.")
+        up_pag = st.file_uploader("Pagamentos", type=["csv", "xlsx", "parquet"])
+        if st.button("Enviar Pagamentos") and up_pag:
+            ok, total, novos = update_pagamentos_db(load_and_process_pagamentos(up_pag)) # Agora atualiza no DB
+            if ok: st.success(f"Pagamentos atualizados! Total: {total} | Novos: {novos}")
+            else: st.error("Erro ao atualizar pagamentos.")
 
 # ══════════════════════════════════════════════════════════════
 # CARREGAMENTO DOS DADOS
@@ -700,34 +697,42 @@ if executar_analise and dados_prontos:
         keep='first'
     )
 
-    df_pagamentos_campanha.rename(columns={'matricula_cliente': 'matricula'}, inplace=True)
+    # Garante que 'matricula' exista para os gráficos
+    if 'matricula_cliente' in df_pagamentos_campanha.columns:
+        df_pagamentos_campanha.rename(columns={'matricula_cliente': 'matricula'}, inplace=True)
+    elif 'matricula_pagamento' in df_pagamentos_campanha.columns:
+        df_pagamentos_campanha.rename(columns={'matricula_pagamento': 'matricula'}, inplace=True)
 
-    # ── Métricas ──────────────────────────────────────────────
+    # ── Métricas da Campanha ──────────────────────────────────
     clientes_unicos_que_pagaram_matriculas = df_pagamentos_campanha['matricula'].nunique()
-    qtd_pagamentos = df_pagamentos_campanha['matricula'].count()
-    valor_total_arrecadado          = df_pagamentos_campanha['valor_pago'].sum() if not df_pagamentos_campanha.empty else 0
-    taxa_eficiencia_clientes_notificados        = (clientes_unicos_que_pagaram_matriculas / total_clientes_notificados * 100) if total_clientes_notificados > 0 else 0
-    taxa_eficiencia_valor_notificados           = (valor_total_arrecadado / total_divida_notificados * 100) if total_divida_notificados > 0 else 0
-    taxa_eficiencia_clientes_base_envios        = (clientes_unicos_que_pagaram_matriculas / total_clientes_unicos_base_envios * 100) if total_clientes_unicos_base_envios > 0 else 0
-    taxa_eficiencia_valor_base           = (valor_total_arrecadado / total_divida_base_envios * 100) if total_divida_base_envios > 0 else 0
-    ticket_medio                    = (valor_total_arrecadado / clientes_unicos_que_pagaram_matriculas) if clientes_unicos_que_pagaram_matriculas > 0 else 0
-    custo_campanha                  = total_base_envio * 0.05
-    roi                             = ((valor_total_arrecadado - custo_campanha) / custo_campanha * 100) if custo_campanha > 0 else 0
-    # ── Abas ─────────────────────────────────────────────────
+    qtd_pagamentos = len(df_pagamentos_campanha)
+    valor_total_arrecadado = df_pagamentos_campanha['valor_pago'].sum()
+
+    taxa_eficiencia_clientes_base_envios = (clientes_unicos_que_pagaram_matriculas / total_clientes_unicos_base_envios * 100) if total_clientes_unicos_base_envios > 0 else 0
+    taxa_eficiencia_clientes_notificados = (clientes_unicos_que_pagaram_matriculas / total_clientes_notificados * 100) if total_clientes_notificados > 0 else 0
+
+    taxa_eficiencia_valor_base = (valor_total_arrecadado / total_divida_base_envios * 100) if total_divida_base_envios > 0 else 0
+    taxa_eficiencia_valor_notificados = (valor_total_arrecadado / total_divida_notificados * 100) if total_divida_notificados > 0 else 0
+
+    ticket_medio = (valor_total_arrecadado / clientes_unicos_que_pagaram_matriculas) if clientes_unicos_que_pagaram_matriculas > 0 else 0
+
+    # Custo da campanha (exemplo: R$ 0.10 por envio entregue)
+    custo_por_envio = 0.10
+    custo_campanha = total_clientes_notificados * custo_por_envio
+    roi = ((valor_total_arrecadado - custo_campanha) / custo_campanha * 100) if custo_campanha > 0 else 0
+
+    # ══════════════════════════════════════════════════════════
+    # ABAS DE VISUALIZAÇÃO
+    # ══════════════════════════════════════════════════════════
     aba1, aba2, aba3, aba4, aba5, aba6 = st.tabs([
-        "📊 Visão Geral",
-        "🏙️ Cidade e Diretoria",
-        "📅 Análise das Faturas",
-        "💳 Canal de Pagamento",
-        "📋 Detalhes",
-        "🧪 Novas Visualizações"
+        "Resumo", "Cidade e Diretoria", "Faturas", "Canais", "Detalhes", "Laboratório"
     ])
 
     # ══════════════════════════════════════════════════════════
-    # ABA 1 — VISÃO GERAL
+    # ABA 1 — RESUMO
     # ══════════════════════════════════════════════════════════
     with aba1:
-        st.subheader("Resultados da Análise da Campanha")
+        st.header(f"Resultados da Campanha: {campanha_selecionada_nome}")
 
         st.markdown("##### 📱 Funil de Disparos")
         col1, col2, col3, col4 = st.columns(4)
