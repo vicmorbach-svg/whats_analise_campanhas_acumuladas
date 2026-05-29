@@ -273,6 +273,7 @@ def load_pagamentos_db(): # Renomeada para refletir o uso do DB
 
 def update_pagamentos_db(df_novo): # Renomeada para update_pagamentos_db
     df_existente = load_pagamentos_db() # Carrega do DB
+
     if df_existente is not None and not df_existente.empty:
         df_combined = pd.concat([df_existente, df_novo], ignore_index=True)
         # Remove duplicatas com base em um conjunto de colunas chave
@@ -283,27 +284,15 @@ def update_pagamentos_db(df_novo): # Renomeada para update_pagamentos_db
     total_antes = len(df_existente) if df_existente is not None else 0
     novos = len(df_combined) - total_antes
 
-    # Para atualizar a tabela de pagamentos, precisamos primeiro apagar a tabela existente
-    # e depois reescrever o DataFrame combinado. Isso garante que as duplicatas sejam removidas
-    # e que o esquema da tabela seja consistente.
-    # Alternativamente, poderíamos usar um upsert, mas 'replace' é mais simples para este caso.
-    # O erro original "column already present" sugere que o 'replace' não estava funcionando como esperado
-    # em algum cenário, possivelmente por conta de um schema já existente e não compatível com a recriação.
-    # A solução mais robusta para evitar o erro de "column already present" ao tentar "replace"
-    # é garantir que a tabela seja explicitamente dropada antes de ser recriada,
-    # ou usar 'append' e gerenciar as duplicatas no Python, como estamos fazendo.
-    # Se o problema for na criação inicial da tabela, 'replace' deveria funcionar.
-    # Se o problema for ao tentar adicionar mais dados, 'append' é o correto.
-    # O erro "column already present" com 'replace' é incomum, a menos que o SQLAlchemy
-    # esteja tentando ALTERAR a coluna em vez de dropar e recriar a tabela.
-
-    # Vamos tentar uma abordagem mais explícita: dropar a tabela e recriar com os dados combinados.
-    # Isso garante que o esquema seja sempre o do DataFrame atualizado.
+    # Dropar a tabela explicitamente antes de reescrever
+    # Isso garante que o esquema seja recriado do zero com base no df_combined
+    # e evita o erro de "column already present" se houver alguma inconsistência
+    # no esquema anterior ou na forma como o 'replace' estava sendo interpretado.
     execute_sql_command(f'DROP TABLE IF EXISTS "{TABLE_PAGAMENTOS.lower()}"')
 
-    # Escreve a base combinada de volta no PostgreSQL, agora com if_exists='append'
-    # para a primeira escrita (que será a criação da tabela) e depois para futuras adições.
-    # Como acabamos de dropar, a tabela será criada do zero.
+    # Escreve a base combinada de volta no PostgreSQL.
+    # Com a tabela dropada, 'append' irá criá-la com o esquema do df_combined.
+    # Se a tabela já existisse (o que não deve acontecer após o DROP), 'append' adicionaria.
     ok = write_to_postgres(df_combined, TABLE_PAGAMENTOS, if_exists='append')
     load_pagamentos_db.clear() # Limpa o cache após a atualização
     return ok, len(df_combined), novos
