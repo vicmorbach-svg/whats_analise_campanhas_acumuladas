@@ -592,8 +592,8 @@ if executar_analise and dados_prontos:
     load_pagamentos_github.clear()
     gc.collect() # Força a limpeza da RAM
 
-    # --- AJUSTE: Remove Cidade/Diretoria do cliente para usar a do Pagamento ---
-    colunas_remover_cliente = [c for c in ['CIDADE', 'DIRETORIA'] if c in df_merge.columns]
+    # --- AJUSTE: Remove Cidade/Diretoria do cliente APENAS se existir no Pagamento ---
+    colunas_remover_cliente = [c for c in ['CIDADE', 'DIRETORIA'] if c in df_merge.columns and c in df_pagamentos_filtrado.columns]
     df_merge = df_merge.drop(columns=colunas_remover_cliente)
 
     # ── Cruzamento final (agora muito mais leve) ──────────────
@@ -833,7 +833,7 @@ if executar_analise and dados_prontos:
                     labels={'DIRETORIA': 'Diretoria', 'VALOR_PAGO': 'Valor (R$)', 'TIPO_PAGAMENTO': 'Canal'},
                     barmode='stack' # Empilha as barras para ver a composição
                 )
-                st.plotly_chart(fig_canal_dir, use_container_width=True)
+                st.plotly_chart(fig_canal_dir, use_container_width=True, key="fig_canal_dir_aba4")
 
             if tem_cidade:
                 st.subheader("Canal de Pagamento por Cidade")
@@ -847,7 +847,7 @@ if executar_analise and dados_prontos:
                     barmode='stack',
                     category_orders={'CIDADE': ordem_cidades}
                 )
-                st.plotly_chart(fig_canal_cid, use_container_width=True)            
+                st.plotly_chart(fig_canal_cid, use_container_width=True, key="fig_canal_cid_aba4")            
         
         else:
             st.info("Coluna 'TIPO_PAGAMENTO' não encontrada no arquivo de pagamentos.")
