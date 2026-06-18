@@ -594,7 +594,7 @@ if executar_analise and dados_prontos:
 
     # --- AJUSTE: Prioriza Cidade/Diretoria da base de Clientes ---
     # Remove do pagamento se já existir no cliente, evitando sobrescrever com dados errados
-    colunas_remover_pagamento = [c for c in ['CIDADE', 'DIRETORIA'] if c in df_merge.columns and c in df_pagamentos_filtrado.columns]
+    colunas_remover_pagamento = [c for c in ['CIDADE', 'DIRETORIA'] if c in df_pagamentos_filtrado.columns]
     df_pagamentos_filtrado = df_pagamentos_filtrado.drop(columns=colunas_remover_pagamento)
 
     # ── Cruzamento final (agora muito mais leve) ──────────────
