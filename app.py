@@ -279,10 +279,22 @@ def load_and_process_envios(uploaded_file):
         # Fallback: se for um arquivo antigo sem a coluna Reason, assume que todos foram entregues
         if 'STATUS_ENVIO' not in df_envios.columns:
             df_envios['STATUS_ENVIO'] = 'DELIVERED_TO_HANDSET'
-            
-        df_envios['TELEFONE_ENVIO'] = df_envios['TELEFONE_ENVIO'].astype(str).str.replace(r'^55|\.0$', '', regex=True).str.strip()
+
+        # OTIMIZAÇÃO: Mantém sua limpeza, mas converte o final para PyArrow
+        df_envios['TELEFONE_ENVIO'] = (
+            df_envios['TELEFONE_ENVIO']
+            .astype(str)
+            .str.replace(r'^55|\.0$', '', regex=True)
+            .str.strip()
+            .astype('string[pyarrow]') # <--- Reduz uso de RAM
+        )
+
+        # OTIMIZAÇÃO: Status tem poucos valores únicos, 'category' consome quase zero memória
+        df_envios['STATUS_ENVIO'] = df_envios['STATUS_ENVIO'].astype('category')
+
         df_envios['DATA_ENVIO'] = pd.to_datetime(df_envios['DATA_ENVIO'], errors='coerce', dayfirst=True)
         df_envios.dropna(subset=['DATA_ENVIO'], inplace=True)
+
         return df_envios
     except Exception as e:
         st.error(f"Erro ao processar Envios: {e}")
@@ -297,19 +309,41 @@ def load_and_process_clientes(uploaded_file):
             df = pd.read_parquet(io.BytesIO(file_bytes), engine='pyarrow')
         else:
             df = pd.read_excel(uploaded_file)
-            
+
         colunas_ler = ['TELEFONE', 'MATRICULA', 'SITUACAO']
         for col in ['CIDADE', 'DIRETORIA']:
             if col in df.columns: colunas_ler.append(col)
 
         df_clientes = df[colunas_ler].copy()
         df_clientes.rename(columns={'TELEFONE': 'TELEFONE_CLIENTE', 'MATRICULA': 'MATRICULA_CLIENTE'}, inplace=True)
-        df_clientes['TELEFONE_CLIENTE'] = df_clientes['TELEFONE_CLIENTE'].astype(str).str.replace(r'^55|\.0$', '', regex=True).str.strip()
-        df_clientes['MATRICULA_CLIENTE'] = df_clientes['MATRICULA_CLIENTE'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
-        df_clientes['SITUACAO'] = pd.to_numeric(df_clientes['SITUACAO'], errors='coerce').fillna(0)
 
-        if 'CIDADE' in df_clientes.columns: df_clientes['CIDADE'] = df_clientes['CIDADE'].astype(str).str.strip()
-        if 'DIRETORIA' in df_clientes.columns: df_clientes['DIRETORIA'] = df_clientes['DIRETORIA'].astype(str).str.strip()
+        # OTIMIZAÇÃO: Limpeza original + conversão PyArrow
+        df_clientes['TELEFONE_CLIENTE'] = (
+            df_clientes['TELEFONE_CLIENTE']
+            .astype(str)
+            .str.replace(r'^55|\.0$', '', regex=True)
+            .str.strip()
+            .astype('string[pyarrow]')
+        )
+
+        # OTIMIZAÇÃO: Limpeza original + conversão PyArrow
+        df_clientes['MATRICULA_CLIENTE'] = (
+            df_clientes['MATRICULA_CLIENTE']
+            .astype(str)
+            .str.replace(r'\.0$', '', regex=True)
+            .str.strip()
+            .astype('string[pyarrow]')
+        )
+
+        # OTIMIZAÇÃO: Downcast reduz o tamanho do número (ex: float64 para float32)
+        df_clientes['SITUACAO'] = pd.to_numeric(df_clientes['SITUACAO'], errors='coerce').fillna(0)
+        df_clientes['SITUACAO'] = pd.to_numeric(df_clientes['SITUACAO'], downcast='float')
+
+        # OTIMIZAÇÃO: Textos repetitivos viram 'category'
+        if 'CIDADE' in df_clientes.columns: 
+            df_clientes['CIDADE'] = df_clientes['CIDADE'].astype(str).str.strip().astype('category')
+        if 'DIRETORIA' in df_clientes.columns: 
+            df_clientes['DIRETORIA'] = df_clientes['DIRETORIA'].astype(str).str.strip().astype('category')
 
         df_clientes.drop_duplicates(subset=['TELEFONE_CLIENTE', 'MATRICULA_CLIENTE'], inplace=True)
         return df_clientes
