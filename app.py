@@ -66,7 +66,7 @@ def get_github_config():
         token  = st.secrets["github"]["token"]
         repo   = st.secrets["github"]["repo"]
         branch = st.secrets["github"].get("branch", "main")
- return token, repo, branch
+         return token, repo, branch
     except Exception:
         return None, None, None
 
