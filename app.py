@@ -552,6 +552,7 @@ if executar_analise and dados_prontos:
 
     total_clientes_unicos_base_envios = df_envios['TELEFONE_ENVIO'].nunique()
     total_clientes_notificados = df_notificados['MATRICULA_CLIENTE'].nunique()
+    total_divida_notificados = df_notificados['SITUACAO'].sum() if 'VALOR_DIVIDA' in df_notificados.columns else 0
     total_clientes_nao_notificados = df_nao_notificados['MATRICULA_CLIENTE'].nunique()
     total_envios_rejeitados = df_merge[~df_merge['NOTIFICADO']]['TELEFONE_ENVIO'].count()
 
