@@ -484,8 +484,8 @@ janela_dias = st.sidebar.slider("Janela de dias após o envio:", 0, 30, 10)
 executar_analise = st.sidebar.button("▶️ Executar Análise")
 
 if is_admin():
-    st.sidebar("🔧 Administração")
-    with st.sidebar.expander("➕ Nova Campan"):
+    st.sidebar.markdown("🔧 Administração")
+    with st.sidebar.expander("➕ Nova Campanha"):
         nome_nova = st.text_input("Nome da campanha")
         up_env = st.file_uploader("Envios (.xlsx, .parquet)", type=["xlsx", "parquet"], key="n_env")
         up_cli = st.file_uploader("Clientes (.xlsx, .parquet)", type=["xlsx", "parquet"], key="n_cli")
