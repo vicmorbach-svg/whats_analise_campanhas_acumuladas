@@ -11,22 +11,17 @@ import gc
 import datetime
 import pytz
 
-# Configura o fuso horário do Brasil
+# Configurações iniciais
 fuso_br = pytz.timezone('America/Sao_Paulo')
 hora_atual = datetime.datetime.now(fuso_br).hour
 
-# Define o funcionamento das 08h às 18h (por exemplo)
 if hora_atual < 8 or hora_atual >= 18:
     st.cache_data.clear()
     st.title("🌙 Sistema em Repouso")
-    st.info("O painel de análise funciona apenas das 08h às 18h para economia de recursos.")
-    st.stop() # Interrompe a execução de todo o resto do código abaixo
+    st.info("O painel de análise funciona apenas das 08h às 18h.")
+    st.stop()
 
-
-# ══════════════════════════════════════════════════════════════
 # SISTEMA DE LOGIN
-# ══════════════════════════════════════════════════════════════
-
 def get_users():
     users = {}
     try:
@@ -65,16 +60,13 @@ def login_screen():
 def is_admin():
     return st.session_state.get("role") == "admin"
 
-# ══════════════════════════════════════════════════════════════
-# GITHUB — Integração
-# ══════════════════════════════════════════════════════════════
-
+# INTEGRAÇÃO COM GITHUB
 def get_github_config():
     try:
         token  = st.secrets["github"]["token"]
         repo   = st.secrets["github"]["repo"]
         branch = st.secrets["github"].get("branch", "main")
-        return token, repo, branch
+ return token, repo, branch
     except Exception:
         return None, None, None
 
@@ -140,13 +132,9 @@ def parquet_bytes_to_df(content_bytes, colunas=None):
     except:
         return None
 
-# ══════════════════════════════════════════════════════════════
 # CAMPANHAS E PAGAMENTOS
-# ══════════════════════════════════════════════════════════════
-
 META_PATH = "data/campanhas_meta.parquet"
 PAG_PATH  = "data/pagamentos.parquet"
-
 
 def load_campanhas_meta():
     content, _ = get_file_from_github(META_PATH)
@@ -218,18 +206,15 @@ def load_pagamentos_github():
     content, _ = get_file_from_github(PAG_PATH)
     if not content: return None
 
-    # Passando as colunas para ler APENAS o necessário
     colunas_uteis = ["MATRICULA_PAGAMENTO", "DATA_PAGAMENTO", "VALOR_PAGO", "CIDADE", "TIPO_PAGAMENTO", "VENCIMENTO", "UTILIZACAO", "TIPO_FATURA"]
     df = parquet_bytes_to_df(content, colunas=colunas_uteis)
 
     if df is not None:
-        # Downcasting imediato (converte textos repetidos em categorias leves)
         colunas_categoricas = ['CIDADE', 'TIPO_PAGAMENTO']
         for col in colunas_categoricas:
             if col in df.columns:
                 df[col] = df[col].astype('category')
 
-        # Reduz o peso da coluna de valor
         if 'VALOR_PAGO' in df.columns:
             df['VALOR_PAGO'] = pd.to_numeric(df['VALOR_PAGO'], downcast='float')
 
@@ -249,21 +234,16 @@ def update_pagamentos_github(df_novo):
     load_pagamentos_github.clear() 
     return ok, len(df_combined), novos
 
-# ══════════════════════════════════════════════════════════════
 # PROCESSAMENTO DE ARQUIVOS
-# ══════════════════════════════════════════════════════════════
-
 @st.cache_data
 def load_and_process_envios(uploaded_file):
     try:
-        # Verifica a extensão para ler corretamente
         if uploaded_file.name.endswith('.parquet'):
             file_bytes = uploaded_file.read()
             df = pd.read_parquet(io.BytesIO(file_bytes), engine='pyarrow')
         else:
             df = pd.read_excel(uploaded_file)
 
-        # Verifica se a coluna Reason existe no arquivo
         colunas_ler = ['To', 'Send At']
         if 'Reason' in df.columns:
             colunas_ler.append('Reason')
@@ -276,20 +256,17 @@ def load_and_process_envios(uploaded_file):
 
         df_envios.rename(columns=renomear, inplace=True)
 
-        # Fallback: se for um arquivo antigo sem a coluna Reason, assume que todos foram entregues
         if 'STATUS_ENVIO' not in df_envios.columns:
             df_envios['STATUS_ENVIO'] = 'DELIVERED_TO_HANDSET'
 
-        # OTIMIZAÇÃO: Mantém sua limpeza, mas converte o final para PyArrow
         df_envios['TELEFONE_ENVIO'] = (
             df_envios['TELEFONE_ENVIO']
             .astype(str)
             .str.replace(r'^55|\.0$', '', regex=True)
             .str.strip()
-            .astype('string[pyarrow]') # <--- Reduz uso de RAM
+            .astype('string[pyarrow]')
         )
 
-        # OTIMIZAÇÃO: Status tem poucos valores únicos, 'category' consome quase zero memória
         df_envios['STATUS_ENVIO'] = df_envios['STATUS_ENVIO'].astype('category')
 
         df_envios['DATA_ENVIO'] = pd.to_datetime(df_envios['DATA_ENVIO'], errors='coerce', dayfirst=True)
@@ -303,7 +280,6 @@ def load_and_process_envios(uploaded_file):
 @st.cache_data
 def load_and_process_clientes(uploaded_file):
     try:
-        # Verifica a extensão para ler corretamente
         if uploaded_file.name.endswith('.parquet'):
             file_bytes = uploaded_file.read()
             df = pd.read_parquet(io.BytesIO(file_bytes), engine='pyarrow')
@@ -317,7 +293,6 @@ def load_and_process_clientes(uploaded_file):
         df_clientes = df[colunas_ler].copy()
         df_clientes.rename(columns={'TELEFONE': 'TELEFONE_CLIENTE', 'MATRICULA': 'MATRICULA_CLIENTE'}, inplace=True)
 
-        # OTIMIZAÇÃO: Limpeza original + conversão PyArrow
         df_clientes['TELEFONE_CLIENTE'] = (
             df_clientes['TELEFONE_CLIENTE']
             .astype(str)
@@ -326,7 +301,6 @@ def load_and_process_clientes(uploaded_file):
             .astype('string[pyarrow]')
         )
 
-        # OTIMIZAÇÃO: Limpeza original + conversão PyArrow
         df_clientes['MATRICULA_CLIENTE'] = (
             df_clientes['MATRICULA_CLIENTE']
             .astype(str)
@@ -335,11 +309,9 @@ def load_and_process_clientes(uploaded_file):
             .astype('string[pyarrow]')
         )
 
-        # OTIMIZAÇÃO: Downcast reduz o tamanho do número (ex: float64 para float32)
         df_clientes['SITUACAO'] = pd.to_numeric(df_clientes['SITUACAO'], errors='coerce').fillna(0)
         df_clientes['SITUACAO'] = pd.to_numeric(df_clientes['SITUACAO'], downcast='float')
 
-        # OTIMIZAÇÃO: Textos repetitivos viram 'category'
         if 'CIDADE' in df_clientes.columns: 
             df_clientes['CIDADE'] = df_clientes['CIDADE'].astype(str).str.strip().astype('category')
         if 'DIRETORIA' in df_clientes.columns: 
@@ -355,7 +327,6 @@ def load_and_process_clientes(uploaded_file):
 def load_and_process_pagamentos(uploaded_file):
     try:
         df = None
-        # 1. Leitura do Arquivo garantindo a extração dos bytes para o Parquet
         if uploaded_file.name.endswith('.parquet'):
             file_bytes = uploaded_file.read()
             df = pd.read_parquet(io.BytesIO(file_bytes), engine='pyarrow')
@@ -377,7 +348,6 @@ def load_and_process_pagamentos(uploaded_file):
             st.error("Arquivo de Pagamentos está vazio.")
             return None
 
-        # 2. Mapeamento Inteligente de Colunas (Por Nome)
         mapeamento_nomes = {
             'Nº Ligação': 'MATRICULA_PAGAMENTO',
             'Data Pagto.': 'DATA_PAGAMENTO',
@@ -392,7 +362,6 @@ def load_and_process_pagamentos(uploaded_file):
         }
         df.rename(columns=mapeamento_nomes, inplace=True)
 
-        # 3. Verifica se as colunas principais existem. Se não, tenta por índice (Fallback)
         if not all(c in df.columns for c in ['MATRICULA_PAGAMENTO', 'DATA_PAGAMENTO', 'VALOR_PAGO']):
             df.columns = range(len(df.columns))
             if df.shape[1] < 10:
@@ -411,14 +380,12 @@ def load_and_process_pagamentos(uploaded_file):
             df_pag = df.iloc[:, col_indices].copy()
             df_pag.columns = col_names
         else:
-            # Mantém apenas as colunas úteis que foram encontradas
             colunas_desejadas = ['MATRICULA_PAGAMENTO', 'DATA_PAGAMENTO', 'VALOR_PAGO']
             for col in ['CIDADE', 'DIRETORIA', 'TIPO_PAGAMENTO', 'VENCIMENTO', 'TIPO_FATURA', 'UTILIZACAO']:
                 if col in df.columns:
                     colunas_desejadas.append(col)
             df_pag = df[colunas_desejadas].copy()
 
-        # 4. Tratamento e Limpeza dos Dados
         df_pag['MATRICULA_PAGAMENTO'] = (
             df_pag['MATRICULA_PAGAMENTO']
             .astype(str)
@@ -428,7 +395,6 @@ def load_and_process_pagamentos(uploaded_file):
 
         df_pag['DATA_PAGAMENTO'] = pd.to_datetime(df_pag['DATA_PAGAMENTO'], errors='coerce', dayfirst=True)
 
-        # Tratamento de Valor Pago (remove R$, espaços, converte vírgula pra ponto)
         if df_pag['VALOR_PAGO'].dtype == object:
             df_pag['VALOR_PAGO'] = (
                 df_pag['VALOR_PAGO']
@@ -440,13 +406,12 @@ def load_and_process_pagamentos(uploaded_file):
             )
         df_pag['VALOR_PAGO'] = pd.to_numeric(df_pag['VALOR_PAGO'], errors='coerce')
 
-        df_pag.dropna(subset=['MATRICULA_PAGAMENTO', 'DATA_PAGAMENTO', 'VALOR_PAGO'], inplace=True)
+        df_pag.dropna(subset=['MATRICULA_PAGAMENTo', 'DATA_PAGAMENTO', 'VALOR_PAGO'], inplace=True)
 
         if df_pag.empty:
             st.error("Nenhuma linha válida restou após o processamento. Verifique os formatos de data e valor.")
             return None
 
-        # 5. Colunas Opcionais
         if 'TIPO_PAGAMENTO' in df_pag.columns:
             df_pag['TIPO_PAGAMENTO'] = df_pag['TIPO_PAGAMENTO'].astype(str).str.strip().replace('nan', 'Não informado')
 
@@ -461,13 +426,12 @@ def load_and_process_pagamentos(uploaded_file):
 
         if 'UTILIZACAO' in df_pag.columns:
             df_pag['UTILIZACAO'] = df_pag['UTILIZACAO'].astype(str).str.strip().replace('nan', 'Não informado')
-            
-        # Otimização de Memória (Downcasting)
+
         colunas_categoricas = ['CIDADE', 'TIPO_PAGAMENTO', 'TIPO_FATURA', 'UTILIZACAO']
         for col in colunas_categoricas:
             if col in df_pag.columns:
                 df_pag[col] = df_pag[col].astype('category')
-                
+
         return df_pag
 
     except Exception as e:
@@ -478,22 +442,18 @@ def fmt_brl(valor):
     try: return f"R$ {float(valor):,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
     except: return "R$ 0,00"
 
-# ══════════════════════════════════════════════════════════════
 # INTERFACE STREAMLIT
-# ══════════════════════════════════════════════════════════════
-
 st.set_page_config(layout="wide", page_title="Análise de campanha de cobrança")
 
 if not st.session_state.get("logged_in"):
     login_screen()
     st.stop()
 
-# Exibe mensagens de sucesso persistentes
 if "msg_sucesso" in st.session_state:
     st.sidebar.success(st.session_state["msg_sucesso"])
     del st.session_state["msg_sucesso"]
 
-st.title("📊 Análise de eficiência de campanha de cobrança via Whatsapp")
+st.title("📊 Análise de eficiência de campanha de cobrança")
 
 st.sidebar.markdown(f"👤 **{st.session_state['username']}**")
 if st.sidebar.button("Sair"):
@@ -502,12 +462,10 @@ if st.sidebar.button("Sair"):
 
 st.sidebar.markdown("---")
 
-# --- NOVO: Indicador fixo de pagamentos na base ---
 st.sidebar.header("🏦 Resumo da Base")
 df_pag_geral = load_pagamentos_github()
 total_pag_geral = len(df_pag_geral) if df_pag_geral is not None else 0
 st.sidebar.metric("Total de Pagamentos Cadastrados", f"{total_pag_geral:,}".replace(",", "."))
-st.sidebar.markdown("---")
 
 st.sidebar.header("📋 Campanhas")
 df_meta = load_campanhas_meta()
@@ -526,8 +484,8 @@ janela_dias = st.sidebar.slider("Janela de dias após o envio:", 0, 30, 10)
 executar_analise = st.sidebar.button("▶️ Executar Análise")
 
 if is_admin():
-    st.sidebar.header("🔧 Administração")
-    with st.sidebar.expander("➕ Nova Campanha"):
+    st.sidebar("🔧 Administração")
+    with st.sidebar.expander("➕ Nova Campan"):
         nome_nova = st.text_input("Nome da campanha")
         up_env = st.file_uploader("Envios (.xlsx, .parquet)", type=["xlsx", "parquet"], key="n_env")
         up_cli = st.file_uploader("Clientes (.xlsx, .parquet)", type=["xlsx", "parquet"], key="n_cli")
@@ -553,10 +511,7 @@ if is_admin():
             ok, total, novos = update_pagamentos_github(load_and_process_pagamentos(up_pag))
             if ok: st.success(f"Pagamentos atualizados! Total: {total} | Novos: {novos}")
 
-# ══════════════════════════════════════════════════════════════
 # CARREGAMENTO DOS DADOS
-# ══════════════════════════════════════════════════════════════
-
 df_envios     = None
 df_clientes   = None
 df_pagamentos = None
@@ -568,70 +523,57 @@ if campanha_selecionada is not None:
         df_clientes = load_campanha_clientes(campanha_selecionada['id'])
         df_pagamentos = load_pagamentos_github()
 
-    # Verifica se todos os 3 arquivos foram carregados com sucesso
     dados_prontos = (
         df_envios is not None and
         df_clientes is not None and
         df_pagamentos is not None
     )
 
-# ══════════════════════════════════════════════════════════════
-# ANÁLISE (VERSÃO OTIMIZADA PARA MEMÓRIA)
-# ══════════════════════════════════════════════════════════════
-
+# ANÁLISE
 if executar_analise and dados_prontos:
 
-    # ── Cruzamento envios x clientes ──────────────────────────
-    total_clientes_unicos_base_envios = df_envios['TELEFONE_ENVIO'].nunique()
-    total_base_envio = df_envios['TELEFONE_ENVIO'].count()
-    total_clientes_notificados = df_envios[df_envios['STATUS_ENVIO'] == 'DELIVERED_TO_HANDSET']['TELEFONE_ENVIO'].nunique()
-    total_envios_rejeitados    = df_envios[df_envios['STATUS_ENVIO'] != 'DELIVERED_TO_HANDSET']['TELEFONE_ENVIO'].count()
-    taxa_eficiencia_disparos   = (total_clientes_notificados / total_clientes_unicos_base_envios * 100) if total_clientes_unicos_base_envios > 0 else 0
-
-    
-
+    # Cruzamento envios x clientes
     df_merge = pd.merge(
         df_envios,
         df_clientes,
         left_on='TELEFONE_ENVIO',
         right_on='TELEFONE_CLIENTE',
-        how='inner'
+        how='left'  # Alterado para incluir todos os clientes
     )
 
     if df_merge.empty:
         st.error("Nenhum cliente encontrado após cruzamento entre envios e clientes.")
         st.stop()
 
-    
+    df_merge['NOTIFICADO'] = df_merge['STATUS_ENVIO'] == 'DELIVERED_TO_HANDSET'
 
-    # Garante tipo string nos campos de matrícula para o merge
+    df_notificados = df_merge[df_merge['NOTIFICADO']]
+    df_nao_notificados = df_merge[~df_merge['NOTIFICADO']]
+
+    total_clientes_unicos_base_envios = df_envios['TELEFONE_ENVIO'].nunique()
+    total_clientes_notificados = df_notificados['MATRICULA_CLIENTE'].nunique()
+    total_clientes_nao_notificados = df_nao_notificados['MATRICULA_CLIENTE'].nunique()
+    total_envios_rejeitados = df_merge[~df_merge['NOTIFICADO']]['TELEFONE_ENVIO'].count()
+
+    taxa_eficiencia_disparos = (total_clientes_notificados / total_clientes_unicos_base_envios * 100) if total_clientes_unicos_base_envios > 0 else 0
+
+    # Garantir tipos para merge
     df_merge['MATRICULA_CLIENTE'] = df_merge['MATRICULA_CLIENTE'].astype(str).str.strip()
     df_pagamentos['MATRICULA_PAGAMENTO'] = df_pagamentos['MATRICULA_PAGAMENTO'].astype(str).str.strip()
 
-    # ── Cálculos de Dívida (Removendo duplicatas por cliente) ──
-    total_divida_base_envios = df_merge.drop_duplicates(subset=['MATRICULA_CLIENTE'])['SITUACAO'].sum()
-
-    df_entregues = df_merge[df_merge['STATUS_ENVIO'] == 'DELIVERED_TO_HANDSET']
-    total_divida_notificados = df_entregues.drop_duplicates(subset=['MATRICULA_CLIENTE'])['SITUACAO'].sum()
-
-    # ── OTIMIZAÇÃO DE MEMÓRIA: Pré-filtragem ──────────────────
-    # Descobre quais matrículas realmente importam para esta campanha
+    # Filtrar matrículas da campanha
     matriculas_alvo = df_merge['MATRICULA_CLIENTE'].unique()
-
-    # Filtra a base gigante de pagamentos ANTES de fazer o merge
     df_pagamentos_filtrado = df_pagamentos[df_pagamentos['MATRICULA_PAGAMENTO'].isin(matriculas_alvo)].copy()
 
-    # Libera a memória da base gigante original (opcional, mas recomendado)
     del df_pagamentos
     load_pagamentos_github.clear()
-    gc.collect() # Força a limpeza da RAM
+    gc.collect()
 
-    # --- AJUSTE: Prioriza Cidade/Diretoria da base de Clientes ---
-    # Remove do pagamento se já existir no cliente, evitando sobrescrever com dados errados
+    # Remover colunas de cidade/diretoria do pagamento para evitar conflitos
     colunas_remover_pagamento = [c for c in ['CIDADE', 'DIRETORIA'] if c in df_pagamentos_filtrado.columns]
     df_pagamentos_filtrado = df_pagamentos_filtrado.drop(columns=colunas_remover_pagamento)
 
-    # ── Cruzamento final (agora muito mais leve) ──────────────
+    # Cruzamento final
     df_cruzado = pd.merge(
         df_merge,
         df_pagamentos_filtrado,
@@ -640,7 +582,6 @@ if executar_analise and dados_prontos:
         how='inner'
     )
 
-    # Limpa variáveis temporárias que não serão mais usadas
     del df_merge
     del df_pagamentos_filtrado
     gc.collect()
@@ -658,7 +599,6 @@ if executar_analise and dados_prontos:
         (df_cruzado['DIAS_APOS_ENVIO'] <= janela_dias)
     ].copy()
 
-    # Limpa o dataframe cruzado completo
     del df_cruzado
     gc.collect()
 
@@ -669,19 +609,25 @@ if executar_analise and dados_prontos:
 
     df_pagamentos_campanha.rename(columns={'MATRICULA_CLIENTE': 'MATRICULA'}, inplace=True)
 
+    # Corrigir regional faltando (OESTE)
+    regionais_esperadas = ['CENTRAL', 'LESTE', 'NORTE', 'OESTE', 'SUL']
+    df_pagamentos_campanha['DIRETORIA'] = df_pagamentos_campanha['DIRETORIA'].fillna('Desconhecido')
+    df_pagamentos_campanha['DIRETORIA'] = df_pagamentos_campanha['DIRETORIA'].str.strip().str.title()
+    df_pagamentos_campanha['DIRETORIA'] = pd.Categorical(df_pagamentos_campanha['DIRETORIA'], categories=regionais_esperadas, ordered=True)
 
-    # ── Métricas ──────────────────────────────────────────────
+    # Métricas
     clientes_unicos_que_pagaram_matriculas = df_pagamentos_campanha['MATRICULA'].nunique()
     qtd_pagamentos = df_pagamentos_campanha['MATRICULA'].count()
-    valor_total_arrecadado          = df_pagamentos_campanha['VALOR_PAGO'].sum() if not df_pagamentos_campanha.empty else 0
-    taxa_eficiencia_clientes_notificados        = (clientes_unicos_que_pagaram_matriculas / total_clientes_notificados * 100) if total_clientes_notificados > 0 else 0
-    taxa_eficiencia_valor_notificados           = (valor_total_arrecadado / total_divida_notificados * 100) if total_divida_notificados > 0 else 0
-    taxa_eficiencia_clientes_base_envios        = (clientes_unicos_que_pagaram_matriculas / total_clientes_unicos_base_envios * 100) if total_clientes_unicos_base_envios > 0 else 0
-    taxa_eficiencia_valor_base           = (valor_total_arrecadado / total_divida_base_envios * 100) if total_divida_base_envios > 0 else 0
-    ticket_medio                    = (valor_total_arrecadado / clientes_unicos_que_pagaram_matriculas) if clientes_unicos_que_pagaram_matriculas > 0 else 0
-    custo_campanha                  = total_base_envio * 0.05
-    roi                             = ((valor_total_arrecadado - custo_campanha) / custo_campanha * 100) if custo_campanha > 0 else 0
-    # ── Abas ─────────────────────────────────────────────────
+    valor_total_arrecadado = df_pagamentos_campanha['VALOR_PAGO'].sum() if not df_pagamentos_campanha.empty else 0
+    taxa_eficiencia_clientes_notificados = (clientes_unicos_que_pagaram_matriculas / total_clientes_notificados * 100) if total_clientes_notificados > 0 else 0
+    taxa_eficiencia_valor_notificados = (valor_total_arrecadado / total_divida_notificados * 100) if total_divida_notificados > 0 else 0
+    taxa_eficiencia_clientes_base_envios = (clientes_unicos_que_pagaram_matriculas / total_clientes_unicos_base_envios * 100) if total_clientes_unicos_base_envios > 0 else 0
+    taxa_eficiencia_valor_base = (valor_total_arrecadado / total_divida_base_envios * 100) if total_divida_base_envios > 0 else 0
+    ticket_medio = (valor_total_arrecadado / clientes_unicos_que_pagaram_matriculas) if clientes_unicos_que_pagaram_matriculas > 0 else 0
+    custo_campanha = total_base_envio * 0.05
+    roi = ((valor_total_arrecadado - custo_campanha) / custo_campanha * 100) if custo_campanha > 0 else 0
+
+    # Abas
     aba1, aba2, aba3, aba4, aba5, aba6 = st.tabs([
         "📊 Visão Geral",
         "🏙️ Cidade e Diretoria",
@@ -691,9 +637,7 @@ if executar_analise and dados_prontos:
         "🧪 Novas Visualizações"
     ])
 
-    # ══════════════════════════════════════════════════════════
     # ABA 1 — VISÃO GERAL
-    # ══════════════════════════════════════════════════════════
     with aba1:
         st.subheader("Resultados da Análise da Campanha")
 
@@ -701,36 +645,34 @@ if executar_analise and dados_prontos:
         col1, col2, col3, col4 = st.columns(4)
         col1.metric("Clientes na base de envios", f"{total_clientes_unicos_base_envios:,}")
         col2.metric("Clientes notificados", f"{total_clientes_notificados:,}")
-        col3.metric("Envios rejeitados", f"{total_envios_rejeitados:,}")
+        col3.metric("Clientes não notificados", f"{total_clientes_nao_notificados:,}")
+        col4.metric("Envios rejeitados", f"{total_envios_rejeitados:,}")
         col4.metric("Eficiência dos disparos", f"{taxa_eficiencia_disparos:,.2f}%".replace(",", "X").replace(".", ",").replace("X", "."))
 
         st.markdown("##### 💰 Conversão e Arrecadação")
         col5, col6 = st.columns(2)
-        col5.metric("Clientes que pagaram",   f"{clientes_unicos_que_pagaram_matriculas:,}")
+        col5.metric("Clientes que pagaram", f"{clientes_unicos_que_pagaram_matriculas:,}")
         col6.metric("Quantidade de pagamentos", f"{qtd_pagamentos:,}")
 
         col7, col8 = st.columns(2)
-        col7.metric("Taxa de eficiência base envios",  f"{taxa_eficiencia_clientes_base_envios:,.2f}%".replace(",", "X").replace(".", ",").replace("X", "."), border=True)
-        col8.metric("Taxa de eficiência clientes notificados",  f"{taxa_eficiencia_clientes_notificados:,.2f}%".replace(",", "X").replace(".", ",").replace("X", "."), border=True)
+        col7.metric("Taxa de eficiência base envios", f"{taxa_eficiencia_clientes_base_envios:,.2f}%".replace(",", "X").replace(".", ",").replace("X", "."), border=True)
+        col8.metric("Taxa de eficiência clientes notificados", f"{taxa_eficiencia_clientes_notificados:,.2f}%".replace(",", "X").replace(".", ",").replace("X", "."), border=True)
 
-        col9, col10, col11 = st.columns(3)
+        col9, col10 = st.columns(2)
         col9.metric("Dívida total da base", fmt_brl(total_divida_base_envios))
         col10.metric("Dívida dos notificados", fmt_brl(total_divida_notificados))
-        col11.metric("Valor total arrecadado",          fmt_brl(valor_total_arrecadado))
 
-        col12, col13 = st.columns(2)
-        col12.metric("Taxa eficiênica dívida total", f"{taxa_eficiencia_valor_base:,.2f}%".replace(",", "X").replace(".", ",").replace("X", "."), border=True)
-        col13.metric("Taxa eficiênica dívida notificada", f"{taxa_eficiencia_valor_notificados:,.2f}%".replace(",", "X").replace(".", ",").replace("X", "."), border=True)
+        col11, col12 = st.columns(2)
+        col11.metric("Valor total arrecadado", fmt_brl(valor_total_arrecadado))
+        col12.metric("Ticket médio", fmt_brl(ticket_medio))
 
-        col14, col15, col16, col17 = st.columns(4)  
-        col14.metric("Ticket médio",   fmt_brl(ticket_medio))
-        col15.metric("Total de disparos", f"{total_base_envio:,}")
-        col16.metric("Custo da campanha", fmt_brl(custo_campanha))
-        col17.metric("ROI",              f"{roi:,.2f}%".replace(",", "X").replace(".", ",").replace("X", "."))
+        col13, col14, col15 = st.columns(3)
+        col13.metric("Total de disparos", f"{total_base_envio:,}")
+        col14.metric("Custo da campanha", fmt_brl(custo_campanha))
+        col15.metric("ROI", f"{roi:,.2f}%".replace(",", "X").replace(".", ",").replace("X", "."))
 
         if not df_pagamentos_campanha.empty:
             st.subheader(f"Pagamentos por Dia Após o Envio (Janela de {janela_dias} dias)")
-
             pagamentos_por_dia = df_pagamentos_campanha.groupby('DIAS_APOS_ENVIO')['VALOR_PAGO'].sum().reset_index()
             pagamentos_por_dia.rename(columns={'DIAS_APOS_ENVIO': 'Dias Após Envio', 'VALOR_PAGO': 'Valor Total Pago'}, inplace=True)
 
@@ -741,12 +683,9 @@ if executar_analise and dados_prontos:
                 labels={'Dias Após Envio': 'Dias Após o Envio', 'Valor Total Pago': 'Valor Total Pago (R$)'},
                 hover_data={'Valor Total Pago': ':.2f'}
             )
-            fig_dias.update_layout(xaxis_title="Dias Após o Envio", yaxis_title="Valor Total Pago (R$)")
             st.plotly_chart(fig_dias, use_container_width=True, key="fig_dias")
 
-    # ══════════════════════════════════════════════════════════
     # ABA 2 — CIDADE E DIRETORIA
-    # ══════════════════════════════════════════════════════════
     with aba2:
         if not df_pagamentos_campanha.empty:
             tem_cidade    = 'CIDADE'    in df_pagamentos_campanha.columns
@@ -769,9 +708,9 @@ if executar_analise and dados_prontos:
             if tem_diretoria:
                 st.subheader("Análise por Diretoria")
                 diretoria_resumo = df_pagamentos_campanha.groupby('DIRETORIA').agg(
-                    Clientes_que_Pagaram=('MATRICULA', 'nunique'),
+                    Clientes_que_Pagaram=('MATricula', 'nunique'),
                     Valor_Arrecadado=('VALOR_PAGO', 'sum')
-                ).reset_index().sort_values('Valor_Arrecadado', ascending=False)
+                ).reindex(regionais_esperadas).fillna(0).reset_index()
 
                 fig_diretoria_valor = px.bar(
                     diretoria_resumo, x='DIRETORIA', y='Valor_Arrecadado',
@@ -783,9 +722,7 @@ if executar_analise and dados_prontos:
             if not tem_cidade and not tem_diretoria:
                 st.info("Colunas 'CIDADE' e 'DIRETORIA' não encontradas na base de clientes.")
 
-    # ══════════════════════════════════════════════════════════
     # ABA 3 — ANÁLISE DAS FATURAS
-    # ══════════════════════════════════════════════════════════
     with aba3:
         if not df_pagamentos_campanha.empty:
             if 'VENCIMENTO' in df_pagamentos_campanha.columns:
@@ -820,9 +757,7 @@ if executar_analise and dados_prontos:
                 )
                 st.plotly_chart(fig_mes_ano, use_container_width=True, key="fig_mes_ano")
 
-    # ══════════════════════════════════════════════════════════
     # ABA 4 — CANAL DE PAGAMENTO
-    # ══════════════════════════════════════════════════════════
     with aba4:
         if not df_pagamentos_campanha.empty and 'TIPO_PAGAMENTO' in df_pagamentos_campanha.columns:
             st.subheader("Valor Arrecadado por Canal de Pagamento")
@@ -838,12 +773,12 @@ if executar_analise and dados_prontos:
             st.plotly_chart(fig_canal_aba4, use_container_width=True, key="fig_canal_aba4")
 
             st.subheader("Clientes que Pagaram por Canal")
-            qtd_por_canal = df_pagamentos_campanha.groupby('TIPO_PAGAMENTO')['MATRICULA'].nunique().reset_index()
+            qtd_por_canal = df_pagamentos_campanha.groupby('TIPO_PAMENTO')['MATRICULA'].nunique().reset_index()
             qtd_por_canal.rename(columns={'MATRICULA': 'Clientes que Pagaram'}, inplace=True)
             qtd_por_canal = qtd_por_canal.sort_values('Clientes que Pagaram', ascending=False)
 
             fig_canal_qtd = px.bar(
-                qtd_por_canal, x='TIPO_PAGAMENTO', y='Clientes que Pagaram',
+                qtd_por_canal, x='TIPO_PAGAMENTO',y='Clientes que Pagaram',
                 title='Clientes que Pagaram por Canal',
                 labels={'TIPO_PAGAMENTO': 'Canal de Pagamento', 'Clientes que Pagaram': 'Clientes que Pagaram'},
                 color='TIPO_PAGAMENTO'
@@ -855,25 +790,20 @@ if executar_analise and dados_prontos:
             tab_canal['Valor Total Pago'] = tab_canal['Valor Total Pago'].apply(fmt_brl)
             st.dataframe(tab_canal, use_container_width=True, hide_index=True)
 
-            # --- NOVO: Cruzamento de Canal por Diretoria e Cidade ---
-            tem_cidade    = 'CIDADE'    in df_pagamentos_campanha.columns
-            tem_diretoria = 'DIRETORIA' in df_pagamentos_campanha.columns
-
-            if tem_diretoria:
+            if 'DIRETORIA' in df_pagamentos_campanha.columns:
                 st.subheader("Canal de Pagamento por Diretoria")
                 canal_diretoria = df_pagamentos_campanha.groupby(['DIRETORIA', 'TIPO_PAGAMENTO'])['VALOR_PAGO'].sum().reset_index()
                 fig_canal_dir = px.bar(
                     canal_diretoria, x='DIRETORIA', y='VALOR_PAGO', color='TIPO_PAGAMENTO',
                     title='Valor Arrecadado: Diretoria x Canal de Pagamento',
                     labels={'DIRETORIA': 'Diretoria', 'VALOR_PAGO': 'Valor (R$)', 'TIPO_PAGAMENTO': 'Canal'},
-                    barmode='stack' # Empilha as barras para ver a composição
+                    barmode='stack'
                 )
                 st.plotly_chart(fig_canal_dir, use_container_width=True, key="fig_canal_dir_aba4")
 
-            if tem_cidade:
+            if 'CIDADE' in df_pagamentos_campanha.columns:
                 st.subheader("Canal de Pagamento por Cidade")
                 canal_cidade = df_pagamentos_campanha.groupby(['CIDADE', 'TIPO_PAGAMENTO'])['VALOR_PAGO'].sum().reset_index()
-                # Ordena para as cidades com maior arrecadação aparecerem primeiro
                 ordem_cidades = canal_cidade.groupby('CIDADE')['VALOR_PAGO'].sum().sort_values(ascending=False).index
                 fig_canal_cid = px.bar(
                     canal_cidade, x='CIDADE', y='VALOR_PAGO', color='TIPO_PAGAMENTO',
@@ -883,13 +813,11 @@ if executar_analise and dados_prontos:
                     category_orders={'CIDADE': ordem_cidades}
                 )
                 st.plotly_chart(fig_canal_cid, use_container_width=True, key="fig_canal_cid_aba4")            
-        
+
         else:
             st.info("Coluna 'TIPO_PAGAMENTO' não encontrada no arquivo de pagamentos.")
 
-    # ══════════════════════════════════════════════════════════
     # ABA 5 — DETALHES
-    # ══════════════════════════════════════════════════════════
     with aba5:
         if not df_pagamentos_campanha.empty:
             st.subheader("Detalhes dos Pagamentos Atribuídos à Campanha")
@@ -917,28 +845,25 @@ if executar_analise and dados_prontos:
         else:
             st.info("Nenhum pagamento encontrado dentro da janela definida para a campanha.")
 
-
-    # ══════════════════════════════════════════════════════════
-    # ABA 6 — NOVAS VISUALIZAÇÕES (LABORATÓRIO)
-    # ══════════════════════════════════════════════════════════
+    # ABA 6 — NOVAS VISUALIZAÇÕES
     with aba6:
         if not df_pagamentos_campanha.empty:
             st.header("Exploração de Novas Visualizações")
             st.markdown("Avalie estes gráficos. Os que forem úteis podem ser movidos para as abas principais depois.")
 
-            # 1. Curva de Arrecadação Acumulada
+            # Curva de Arrecadação Acumulada
             st.subheader("📈 Curva de Arrecadação Acumulada")
             df_acumulado = df_pagamentos_campanha.groupby('DIAS_APOS_ENVIO')['VALOR_PAGO'].sum().reset_index()
             df_acumulado['VALOR_ACUMULADO'] = df_acumulado['VALOR_PAGO'].cumsum()
             fig_acumulado = px.line(
                 df_acumulado, x='DIAS_APOS_ENVIO', y='VALOR_ACUMULADO',
-                title='Evolução da Arrecadação (Acumulada ao longo dos dias)',
+                title='Evolução da Arrecadação (Accumulada ao longo dos dias)',
                 labels={'DIAS_APOS_ENVIO': 'Dias Após o Envio', 'VALOR_ACUMULADO': 'Valor Acumulado (R$)'},
                 markers=True
             )
             st.plotly_chart(fig_acumulado, use_container_width=True, key="fig_acumulado_aba6")
 
-            # 2. Canal de Pagamento por Cidade (Gráfico Empilhado)
+            # Canal de Pagamento por Cidade (Gráfico Empilhado)
             if 'CIDADE' in df_pagamentos_campanha.columns and 'TIPO_PAGAMENTO' in df_pagamentos_campanha.columns:
                 st.subheader("🏙️ Canal de Pagamento por Cidade")
                 canal_cidade = df_pagamentos_campanha.groupby(['CIDADE', 'TIPO_PAGAMENTO'])['VALOR_PAGO'].sum().reset_index()
@@ -947,12 +872,12 @@ if executar_analise and dados_prontos:
                     canal_cidade, x='CIDADE', y='VALOR_PAGO', color='TIPO_PAGAMENTO',
                     title='Valor Arrecadado: Cidade x Canal de Pagamento',
                     labels={'CIDADE': 'Cidade', 'VALOR_PAGO': 'Valor (R$)', 'TIPO_PAGAMENTO': 'Canal'},
-                    barmode='stack',
+                    bargmode='stack',
                     category_orders={'CIDADE': ordem_cidades}
                 )
                 st.plotly_chart(fig_canal_cid, use_container_width=True, key="fig_canal_cid_aba6")
 
-            # 3. Ticket Médio por Cidade
+            # Ticket Médio por Cidade
             if 'CIDADE' in df_pagamentos_campanha.columns:
                 st.subheader("🎫 Ticket Médio por Cidade")
                 tm_cidade = df_pagamentos_campanha.groupby('CIDADE').agg(
@@ -969,7 +894,7 @@ if executar_analise and dados_prontos:
                 )
                 st.plotly_chart(fig_tm_cid, use_container_width=True, key="fig_tm_cid_aba6")
 
-            # 4. Mapa de Calor: Dia do Pagamento x Canal
+            # Mapa de Calor: Dia do Pagamento x Canal
             if 'TIPO_PAGAMENTO' in df_pagamentos_campanha.columns:
                 st.subheader("🔥 Concentração: Tempo de Pagamento x Canal")
                 heatmap_data = df_pagamentos_campanha.groupby(['TIPO_PAGAMENTO', 'DIAS_APOS_ENVIO'])['VALOR_PAGO'].sum().reset_index()
@@ -981,7 +906,7 @@ if executar_analise and dados_prontos:
                 )
                 st.plotly_chart(fig_heat, use_container_width=True, key="fig_heat_aba6")
 
-            # 5. Utilização (Subcategoria)
+            # Utilização (Subcategoria)
             if 'UTILIZACAO' in df_pagamentos_campanha.columns:
                 st.subheader("💧 Arrecadação por Tipo de Utilização")
                 util_resumo = df_pagamentos_campanha.groupby('UTILIZACAO')['VALOR_PAGO'].sum().reset_index().sort_values('VALOR_PAGO', ascending=False)
@@ -1006,4 +931,4 @@ elif not executar_analise:
     if campanha_selecionada is None:
         st.info("👈 Selecione uma campanha na barra lateral para começar.")
     else:
-        st.info("👈 Clique em **Executar Análise** na barra lateral para gerar os resultados.")
+        st.info("👈 Clique em **Executar Análise** na barra lateral para gerar os os resultados.")
