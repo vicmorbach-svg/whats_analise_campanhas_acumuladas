@@ -9,5 +9,5 @@ pytz
 psycopg2-binary
 sqlalchemy
 polars
-fastexcell
+fastexcel
 #
